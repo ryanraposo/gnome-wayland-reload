@@ -1,13 +1,27 @@
 ---
 name: gnome-wayland-reload
-description: Diagnose and reload GNOME Shell extensions on GNOME 49–50 Wayland without disrupting the host session. Use for extension development or recovery involving disable/enable cycling, edited extension.js or imported JavaScript, prefs.js, stylesheet.css, metadata.json, GSettings schemas, nested gnome-shell --devkit sessions, Looking Glass, or GNOME Shell logs. Also use when deciding whether a logout is truly required or when unsafe restart advice must be avoided.
-metadata:
-  hermes:
-    tags: [gnome, wayland, extensions, development, debugging, linux]
-    category: software-development
+description: >-
+  Diagnose, develop, reload, and recover GNOME Shell extensions on GNOME
+  49–50 Wayland without killing the compositor. Use whenever a user asks to
+  reload, restart, or refresh an extension; says edited extension.js, imported
+  JavaScript, metadata.json, stylesheet.css, prefs.js, or GSettings schemas are
+  not taking effect; reports that disable/enable did not load new code, an
+  extension is ACTIVE or ERROR but its UI is missing, duplicated, stuck, or
+  behaving strangely, or animations reset after polling; needs GNOME Shell
+  logs, Looking Glass, a cache-busted host hot-swap, lifecycle cleanup, schema
+  compilation, or a nested gnome-shell --devkit session; needs to prove that
+  installed bytes are actually running; or asks whether Alt+F2 r,
+  gnome-shell --replace, logout/login, or another Shell restart is safe or
+  necessary on Wayland. Do not use for ordinary GNOME app automation or
+  screenshots unrelated to Shell-extension reload, development, or recovery.
 ---
 
 # Reload GNOME Extensions on Wayland
+
+At the start of the first reload or diagnosis in a session, run
+`scripts/check-update.sh --quiet`. Continue normally if the network is offline.
+If it reports an update, tell the user and give the printed reinstall command;
+never update the installed skill silently.
 
 Treat the host GNOME Shell as the Wayland compositor. It cannot be restarted
 in-place while preserving the graphical session. Prefer the smallest refresh
@@ -87,10 +101,11 @@ This is still not a fresh JavaScript process.
 
 ## Run a Fresh Nested Shell
 
-On Ubuntu 26.04, install the development runner if needed:
+On Ubuntu 26.04, install the development runner if needed. For an agent-driven
+install, prefer the narrow graphical privilege prompt over a root shell:
 
 ```bash
-sudo apt install mutter-dev-bin
+pkexec apt-get install -y mutter-dev-bin
 ```
 
 Launch a disposable GNOME 49+ / 50 development Shell:

@@ -42,7 +42,9 @@ Run as your normal desktop user—**not with `sudo`**:
 curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 ```
 
-The installer places complete, independent copies in both skill homes:
+The installer places complete, independent, runtime-native copies in both skill
+homes. The Agent Skills copy uses OpenAI's minimal skill metadata and UI file;
+the Hermes copy uses Hermes version, platform, tag, and related-skill metadata:
 
 ```text
 ~/.agents/skills/gnome-wayland-reload
@@ -68,6 +70,10 @@ cd gnome-wayland-reload
 
 Start a new agent session after installation so its skill index is rebuilt.
 Hermes can also rescan in-session with `/reload-skills`.
+
+Each installed skill checks the published `VERSION` at most once per day when
+first used. The check is offline-safe and never updates files by itself. Run
+`scripts/check-update.sh --force` for an immediate check.
 
 ## Decision matrix
 
@@ -101,7 +107,7 @@ intentional.
 Install the Ubuntu development runner once:
 
 ```bash
-sudo apt install mutter-dev-bin
+pkexec apt-get install -y mutter-dev-bin
 ```
 
 Then launch a fresh, disposable Shell in a window:
@@ -198,6 +204,7 @@ restore any unmanaged directories backed up by the latest installation.
 | `scripts/diagnose.sh` | Session and prerequisite report |
 | `scripts/looking-glass-hotswap.sh` | Print a guarded top-level host hot-swap snippet |
 | `scripts/inspect-shell-source.sh` | Extract JavaScript from the installed GNOME Shell build |
+| `scripts/check-update.sh` | Cached, non-mutating release update check |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
 | `references/gnome-50-debugging-notes.md` | Host hot-swap caveats and GNOME 50 debugging findings |
 | `assets/mascot.txt` | Reloop, the nested-Shell mechanic and his reload staff |

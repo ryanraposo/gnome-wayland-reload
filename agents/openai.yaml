@@ -1,5 +1,8 @@
 interface:
   display_name: "GNOME Wayland Reload"
-  short_description: "Reload GNOME extensions without logging out"
+  short_description: "Debug and reload GNOME Shell extensions"
   brand_color: "#000000"
-  default_prompt: "Use $gnome-wayland-reload to choose and run the safest reload workflow for this GNOME Shell extension change."
+  default_prompt: "Use $gnome-wayland-reload to diagnose why my GNOME Shell extension changes are not appearing on Wayland and choose the safest refresh."
+
+policy:
+  allow_implicit_invocation: true

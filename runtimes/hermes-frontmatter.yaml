@@ -1,0 +1,21 @@
+---
+name: gnome-wayland-reload
+description: >-
+  Use when GNOME Shell extension changes do not appear on GNOME 49–50
+  Wayland; disable/enable does not load edited JavaScript; extension UI is
+  missing, duplicated, stuck, stretched, or periodically resetting; prefs,
+  stylesheets, metadata, schemas, logs, Looking Glass, lifecycle cleanup,
+  nested gnome-shell --devkit, or a cache-busted host hot-swap are involved;
+  or the user asks whether Alt+F2 r, gnome-shell --replace, logout/login, or
+  another Shell restart is safe or necessary. Do not use for ordinary GNOME
+  app automation or unrelated screenshots.
+version: 2.2.0
+author: Ryan Raposo
+license: MIT
+platforms: [linux]
+metadata:
+  hermes:
+    tags: [gnome, wayland, extensions, development, debugging, linux]
+    category: software-development
+    related_skills: [computer-use]
+---

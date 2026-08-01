@@ -58,15 +58,18 @@ fi
 
 FILES=(
     SKILL.md
+    VERSION
     LICENSE
     agents/openai.yaml
     assets/mascot.txt
+    runtimes/hermes-frontmatter.yaml
     references/gnome-50-debugging-notes.md
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
     scripts/diagnose.sh
     scripts/looking-glass-hotswap.sh
     scripts/inspect-shell-source.sh
+    scripts/check-update.sh
 )
 
 stage="$(mktemp -d)"
@@ -119,6 +122,16 @@ install_target() {
     temp_targets+=("$temp_target")
     mkdir "$temp_target"
     cp -a "$stage/." "$temp_target/"
+    if [ "$label" = hermes ]; then
+        awk 'BEGIN { body = 0 } /^---$/ { if (++markers == 2) { body = 1; next } } body' \
+            "$stage/SKILL.md" > "$temp_target/.skill-body"
+        cat "$stage/runtimes/hermes-frontmatter.yaml" "$temp_target/.skill-body" \
+            > "$temp_target/SKILL.md"
+        rm -f "$temp_target/.skill-body"
+        rm -rf "$temp_target/agents" "$temp_target/runtimes"
+    else
+        rm -rf "$temp_target/runtimes"
+    fi
     printf 'managed-by=%s\nsource=https://github.com/ryanraposo/%s\n' \
         "$NAME" "$NAME" > "$temp_target/.$NAME-managed"
 

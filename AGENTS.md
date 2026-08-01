@@ -12,7 +12,13 @@ When a user points at this repository and asks to install it:
 
 The installer does not install Ubuntu packages. `mutter-dev-bin` is required
 only for the nested development-Shell workflow and should be installed with
-the user's normal package-management approval.
+the user's normal package-management approval. Prefer
+`pkexec apt-get install -y mutter-dev-bin` for an agent-driven graphical
+privilege prompt; do not open a general-purpose root shell.
+
+The repository root `SKILL.md` follows OpenAI Agent Skills metadata rules. The
+installer composes the Hermes copy with `runtimes/hermes-frontmatter.yaml`, so
+the installed payload follows Hermes's versioned, tagged metadata shape.
 
 ## Use it yourself
 

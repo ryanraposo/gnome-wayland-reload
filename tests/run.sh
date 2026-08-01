@@ -24,6 +24,27 @@ else
     assert "canonical skill has a description" grep -q '^description: ' "$ROOT/SKILL.md"
 fi
 
+assert "trigger description covers stale extension code" \
+    grep -q 'not taking effect' "$ROOT/SKILL.md"
+assert "trigger description covers ineffective lifecycle cycling" \
+    grep -q 'disable/enable did not load new code' "$ROOT/SKILL.md"
+assert "trigger description covers host hot-swaps" \
+    grep -q 'cache-busted host hot-swap' "$ROOT/SKILL.md"
+assert "trigger description covers unsafe restart questions" \
+    grep -q 'gnome-shell --replace, logout/login' "$ROOT/SKILL.md"
+assert "trigger description excludes unrelated desktop automation" \
+    grep -q 'ordinary GNOME app automation' "$ROOT/SKILL.md"
+assert "skill metadata permits implicit invocation" \
+    grep -q '^  allow_implicit_invocation: true$' "$ROOT/agents/openai.yaml"
+assert "OpenAI skill frontmatter stays minimal" sh -c \
+    'sed -n "2,/^---$/p" "$1" | grep -Eq "^(name|description):" && ! sed -n "2,/^---$/p" "$1" | grep -Eq "^(version|author|license|platforms|metadata):"' \
+    sh "$ROOT/SKILL.md"
+assert "Hermes payload starts with use-when triggering" \
+    grep -q '^  Use when GNOME Shell extension changes' "$ROOT/runtimes/hermes-frontmatter.yaml"
+assert "Hermes payload carries versioned platform metadata" sh -c \
+    'grep -q "^version: " "$1" && grep -q "^platforms: \[linux\]" "$1" && grep -q "^  hermes:$" "$1"' \
+    sh "$ROOT/runtimes/hermes-frontmatter.yaml"
+
 assert "README references the canonical install URL" \
     grep -q 'ryanraposo.github.io/gnome-wayland-reload/install.sh' "$ROOT/README.md"
 assert "license is explicit MIT" grep -q '^MIT License$' "$ROOT/LICENSE"
@@ -56,6 +77,12 @@ assert "successful install prints alternate Reloop" grep -q '\^x\^' "$TEST_TMP/i
 assert "successful install prints alternate staff pose" grep -q '^█───█' "$TEST_TMP/install.out"
 assert "local install creates Agent Skills copy" test -f "$agents_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install creates Hermes copy" test -f "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+assert "Agent install keeps OpenAI UI metadata" \
+    test -f "$agents_home/skills/gnome-wayland-reload/agents/openai.yaml"
+assert "Hermes install omits OpenAI-only UI metadata" \
+    test ! -e "$hermes_home/skills/gnome-wayland-reload/agents/openai.yaml"
+assert "Hermes install carries Hermes-native metadata" \
+    grep -q '^version: 2.2.0$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install includes GNOME 50 debugging reference" \
     test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
 assert "local install includes the Reloop mascot" \
@@ -64,6 +91,28 @@ assert "installed copy has managed marker" test -f "$agents_home/skills/gnome-wa
 assert "installed helper remains executable" test -x "$agents_home/skills/gnome-wayland-reload/scripts/dev-shell.sh"
 assert "installed hot-swap helper remains executable" \
     test -x "$agents_home/skills/gnome-wayland-reload/scripts/looking-glass-hotswap.sh"
+assert "installed update helper remains executable" \
+    test -x "$agents_home/skills/gnome-wayland-reload/scripts/check-update.sh"
+
+update_remote="$TEST_TMP/update-remote"
+update_state="$TEST_TMP/update-state"
+mkdir -p "$update_remote"
+printf '9.9.9\n' > "$update_remote/VERSION"
+update_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
+    GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
+    "$ROOT/scripts/check-update.sh" --force)
+assert "update checker reports a newer published version" \
+    grep -q '2.2.0 -> 9.9.9' <<< "$update_out"
+printf '0.0.1\n' > "$update_remote/VERSION"
+cached_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
+    GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
+    "$ROOT/scripts/check-update.sh")
+assert "update checker caches the successful lookup" \
+    grep -q '2.2.0 -> 9.9.9' <<< "$cached_out"
+offline_out=$(GNOME_WAYLAND_RELOAD_BASE_URL='file:///does-not-exist' \
+    GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$TEST_TMP/offline-state" \
+    "$ROOT/scripts/check-update.sh" --force --quiet)
+assert "offline quiet update checks are nonfatal" test -z "$offline_out"
 
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
 GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" >/dev/null
