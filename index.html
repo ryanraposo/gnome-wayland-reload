@@ -6,18 +6,24 @@
   <meta name="description" content="Definitive GNOME 50 Wayland extension reload workflows without restarting the host desktop.">
   <title>gnome-wayland-reload</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#000;font-family:"Courier New",monospace;padding:36px 20px}main{width:min(760px,100%);text-align:center}.orb{width:116px;height:116px}h1{font-size:clamp(1.7rem,5vw,2.45rem);margin:14px 0 8px}p{color:#555;line-height:1.65}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:28px 0}.card{text-align:left;border:1px solid #d8d8d8;border-radius:10px;padding:16px;font-size:13px;line-height:1.55;color:#555}.card strong{display:block;color:#000;margin-bottom:6px}.curl{display:flex;gap:12px;align-items:center;background:#f5f5f5;border:1px solid #ddd;border-radius:10px;padding:15px;text-align:left;overflow:auto}.curl code{font:13px inherit;white-space:nowrap}.curl button{margin-left:auto;background:#fff;border:1px solid #aaa;border-radius:6px;padding:7px 10px;cursor:pointer}.curl button:hover{background:#000;color:#fff}.note{border-left:3px solid #000;background:#fafafa;padding:13px 16px;text-align:left;font-size:13px;margin:18px 0}.links{font-size:13px;margin-top:26px}.links a{color:#000}@media(max-width:650px){.grid{grid-template-columns:1fr}.curl{align-items:flex-start}.curl button{position:sticky;right:0}}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#000;font-family:"Courier New",monospace;padding:36px 20px}main{width:min(760px,100%);text-align:center}.mascot{display:inline-block;margin:0;line-height:1.05;font-size:20px;text-align:left}h1{font-size:clamp(1.7rem,5vw,2.45rem);margin:14px 0 8px}p{color:#555;line-height:1.65}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:28px 0}.card{text-align:left;border:1px solid #d8d8d8;border-radius:10px;padding:16px;font-size:13px;line-height:1.55;color:#555}.card strong{display:block;color:#000;margin-bottom:6px}.curl{display:flex;gap:12px;align-items:center;background:#f5f5f5;border:1px solid #ddd;border-radius:10px;padding:15px;text-align:left;overflow:auto}.curl code{font:13px inherit;white-space:nowrap}.curl button{margin-left:auto;background:#fff;border:1px solid #aaa;border-radius:6px;padding:7px 10px;cursor:pointer}.curl button:hover{background:#000;color:#fff}.note{border-left:3px solid #000;background:#fafafa;padding:13px 16px;text-align:left;font-size:13px;margin:18px 0}.links{font-size:13px;margin-top:26px}.links a{color:#000}@media(max-width:650px){.grid{grid-template-columns:1fr}.curl{align-items:flex-start}.curl button{position:sticky;right:0}}
   </style>
 </head>
 <body>
   <main>
-    <img class="orb" src="assets/orb.svg" alt="Black-and-white reload orb">
+    <pre class="mascot" aria-label="Reloop, the nested-Shell mechanic holding a reload staff">&lt; ▄▄ @ ▄▄ &gt;   @
+   ▄▀ 0x0 ▀▄   █
+    █  ───  █──█
+    █  ███  █  █
+     ▀▀   ▀▀   █</pre>
     <h1>gnome-wayland-reload</h1>
     <p>Fresh extension code. Disposable nested Shells.<br>No ceremonial logout.</p>
+    <p><small>Reloop, the nested-Shell mechanic.</small></p>
     <div class="grid">
       <div class="card"><strong>Lifecycle</strong>Soft-cycle one enabled extension when cleanup or settings reaction is enough.</div>
       <div class="card"><strong>Fresh code</strong>Run GNOME 50 in a nested devkit window and restart only that disposable process.</div>
       <div class="card"><strong>Preferences</strong>Close and reopen the separate GJS preferences process; compile schemas when needed.</div>
+      <div class="card"><strong>Host diagnostic</strong>Generate a guarded Looking Glass hot-swap for one top-level module when host state matters.</div>
     </div>
     <div class="curl">
       <code id="command">curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash</code>

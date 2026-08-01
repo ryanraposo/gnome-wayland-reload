@@ -60,10 +60,13 @@ FILES=(
     SKILL.md
     LICENSE
     agents/openai.yaml
-    assets/orb.svg
+    assets/mascot.txt
+    references/gnome-50-debugging-notes.md
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
     scripts/diagnose.sh
+    scripts/looking-glass-hotswap.sh
+    scripts/inspect-shell-source.sh
 )
 
 stage="$(mktemp -d)"
@@ -158,6 +161,14 @@ case "$MODE" in
         ;;
 esac
 
+echo
+cat <<'MASCOT'
+@   < ▄▄ @ ▄▄ >
+█    ▄▀ ^x^ ▀▄
+█───█  ───  █
+█   █  ███  █
+█    ▀▀   ▀▀
+MASCOT
 echo
 echo "GNOME Wayland Reload installed."
 echo "Start a fresh agent session so it discovers the skill."

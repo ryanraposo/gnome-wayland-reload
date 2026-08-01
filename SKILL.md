@@ -22,12 +22,21 @@ that can actually load the changed artifact.
 | `stylesheet.css` | Soft-cycle first |
 | `prefs.js` or preference-only imports | Close and reopen preferences |
 | `extension.js` or a Shell-side imported `.js` module | Fresh nested Shell; otherwise host logout/login |
+| Small top-level `extension.js` diagnostic that must preserve host state | Guarded Looking Glass hot-swap (advanced/private) |
 | `metadata.json` | Fresh nested Shell; otherwise host logout/login |
 | GSettings schema XML | Compile schemas, then restart the process that consumes them |
 | Native library, typelib, or Shell process state | Fresh nested Shell; otherwise host logout/login |
 
 Do not claim that disable/enable loads edited Shell-side JavaScript. GJS cannot
 unload an already-imported module from the running Shell process.
+
+A cache-busted dynamic import from Looking Glass can hot-swap a simple
+`extension.js` for diagnosis on the host. This relies on private GNOME Shell
+internals, leaves the old module resident, and does not refresh ordinary
+relative imports. Keep the nested Shell as the supported development loop; use
+the hot-swap only when preserving current host-session state is materially
+useful. See `references/gnome-50-debugging-notes.md` for the guarded recipe and
+recovery limits.
 
 ## Establish the Target
 
@@ -105,6 +114,25 @@ desktop.
 Treat the nested Shell as disposable, not sandboxed. It has little isolation,
 shares the user's home directory and settings, and can still modify user data.
 
+## Hot-Swap One Top-Level Module (Advanced)
+
+When a host-only state is expensive to recreate and the change is confined to
+the top-level `extension.js`, generate a guarded Looking Glass snippet:
+
+```bash
+scripts/looking-glass-hotswap.sh UUID
+```
+
+Open Looking Glass with `Alt`+`F2`, then `lg`, and paste the generated code into
+its JavaScript evaluator. The snippet disables the extension, dynamically
+imports `extension.js` with a unique query, constructs a new state object, and
+enables it. It retains the previous state object for a best-effort rollback.
+
+Do not use this for imported modules, metadata, schemas, native code, repeated
+development cycles, or an extension whose cleanup is not known to be
+idempotent. Immediately verify `ACTIVE` state, fresh logs, and behavior. Use a
+fresh nested Shell if anything is uncertain.
+
 ## Reload Preferences and Schemas
 
 Preferences run in a separate `gjs` process. Close the preferences window and
@@ -147,7 +175,43 @@ journalctl -f -o cat /usr/bin/gnome-shell |
 
 Open Looking Glass with `Alt`+`F2`, then `lg`. Use its Extensions page to
 inspect loaded state, errors, source location, and metadata. Looking Glass does
-not defeat module caching.
+not defeat module caching by itself. A normal disable/enable from Looking
+Glass still uses the cached module.
+
+Do not treat matching source and installed-file hashes as proof that those
+bytes are running. Verify three layers: the installed artifact, the extension's
+`ACTIVE` state and fresh journal entries, and an observable behavior or unique
+diagnostic marker from the new code. For animation bugs, capture several frames
+across more than one polling interval so a periodic reset is visible.
+
+## Separate Reload Failures from Runtime Bugs
+
+Before escalating to a fresh process, check whether the new module is active
+but behaving incorrectly. GNOME 50 pitfalls observed in practice include:
+
+- `actor.ease()` consumes `repeatCount` and `autoReverse`; snake_case belongs
+  to lower-level `Clutter.PropertyTransition` construction and is silently
+  wrong in the `ease()` options object.
+- A status poll that reapplies the same state can restart an otherwise-correct
+  animation. Animate only when the semantic state changes.
+- A square `St.Icon.icon_size` can stretch non-square raster artwork. Load the
+  texture with one unconstrained dimension and center it in a fixed container.
+- Partial `enable()` failure can strand actors. Initialize owned fields first,
+  make `disable()` idempotent, and call it from an `enable()` failure path.
+- APIs and option bags are versioned. GNOME 50 uses gesture APIs such as
+  `Clutter.PanGesture` and `Clutter.ClickGesture`; inspect the installed Shell
+  sources and logs instead of assuming an older example still applies.
+
+The reference note contains concrete snippets and local-source inspection
+commands for these cases.
+
+Use the bundled inspector to read the exact JavaScript shipped by the current
+GNOME Shell build:
+
+```bash
+scripts/inspect-shell-source.sh environment
+scripts/inspect-shell-source.sh extension-system
+```
 
 ## Reject Unsafe Host-Restart Advice
 

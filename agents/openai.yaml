@@ -1,7 +1,5 @@
 interface:
   display_name: "GNOME Wayland Reload"
   short_description: "Reload GNOME extensions without logging out"
-  icon_small: "./assets/orb.svg"
-  icon_large: "./assets/orb.svg"
   brand_color: "#000000"
   default_prompt: "Use $gnome-wayland-reload to choose and run the safest reload workflow for this GNOME Shell extension change."

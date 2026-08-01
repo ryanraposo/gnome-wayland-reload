@@ -1,12 +1,21 @@
 <div align="center">
-<img src="assets/orb.svg" width="112" alt="A black-and-white reload orb">
+<pre>
+&lt; ▄▄ @ ▄▄ &gt;   @
+   ▄▀ 0x0 ▀▄   █
+    █  ───  █──█
+    █  ███  █  █
+     ▀▀   ▀▀   █
+</pre>
 
 # gnome-wayland-reload
 
 Fresh extension code. Disposable nested Shells. No ceremonial logout.
 
+<sub>Reloop, the nested-Shell mechanic.</sub>
+
 [Install](#install) · [Decision matrix](#decision-matrix) ·
-[Development loop](#the-development-loop) · [Uninstall](#uninstall)
+[Development loop](#the-development-loop) · [Host hot-swap](#advanced-host-hot-swap) ·
+[Uninstall](#uninstall)
 </div>
 
 ---
@@ -70,6 +79,7 @@ Hermes can also rescan in-session with `/reload-skills`.
 | `stylesheet.css` | Disable → enable first |
 | `prefs.js` | Close → reopen preferences |
 | `extension.js` or imported Shell-side JavaScript | Fresh nested Shell |
+| Small top-level `extension.js` host diagnostic | Guarded Looking Glass hot-swap |
 | `metadata.json` | Fresh nested Shell |
 | Schema XML | Compile schemas, then refresh its consumer |
 | Host-only behavior that cannot reproduce nested | Logout → login |
@@ -109,6 +119,20 @@ Shell and start it again. Your host desktop and its open applications stay put.
 The nested session shares your home directory and settings. It is a clean Shell
 process, not a security sandbox.
 
+## Advanced host hot-swap
+
+For a small top-level `extension.js` change that must be tested against host-only
+state, generate a guarded Looking Glass snippet:
+
+```bash
+~/.agents/skills/gnome-wayland-reload/scripts/looking-glass-hotswap.sh \
+  your-extension@example.com
+```
+
+This is an explicitly advanced diagnostic path. It uses private Shell APIs,
+does not refresh relative imports or metadata, and retains old modules. Prefer
+the nested development Shell for normal iteration.
+
 ## Preferences, schemas, and logs
 
 ```bash
@@ -127,6 +151,15 @@ Run the bundled environment report when the loop is unavailable:
 Looking Glass remains useful for live inspection: press `Alt`+`F2`, enter `lg`,
 and open Extensions. It shows state and errors, but it cannot unload cached
 modules.
+
+For one-off host diagnosis, GNOME 50 can cache-bust and dynamically import a
+simple top-level `extension.js` from Looking Glass, then replace the live
+extension instance. This relies on private Shell internals, retains old modules,
+and does not reload relative imports, metadata, or schemas. The supported loop
+remains a fresh nested Shell. See
+[`references/gnome-50-debugging-notes.md`](references/gnome-50-debugging-notes.md)
+for the guarded recipe, recovery limits, verification ladder, and runtime bugs
+that commonly look like stale code.
 
 ## Commands to avoid on the host
 
@@ -165,7 +198,11 @@ restore any unmanaged directories backed up by the latest installation.
 | `scripts/recycle-extension.sh` | Verified lifecycle recycle for one UUID |
 | `scripts/dev-shell.sh` | GNOME 49+ nested development Shell launcher |
 | `scripts/diagnose.sh` | Session and prerequisite report |
+| `scripts/looking-glass-hotswap.sh` | Print a guarded top-level host hot-swap snippet |
+| `scripts/inspect-shell-source.sh` | Extract JavaScript from the installed GNOME Shell build |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
+| `references/gnome-50-debugging-notes.md` | Host hot-swap caveats and GNOME 50 debugging findings |
+| `assets/mascot.txt` | Reloop, the nested-Shell mechanic and his reload staff |
 | `tests/run.sh` | Installer and helper regression tests |
 | `agents/openai.yaml` | Skill-list UI metadata |
 

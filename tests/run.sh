@@ -27,21 +27,47 @@ fi
 assert "README references the canonical install URL" \
     grep -q 'ryanraposo.github.io/gnome-wayland-reload/install.sh' "$ROOT/README.md"
 assert "license is explicit MIT" grep -q '^MIT License$' "$ROOT/LICENSE"
-assert "orb asset is valid XML-shaped SVG" grep -q '<svg ' "$ROOT/assets/orb.svg"
+assert "README introduces the Reloop mascot" grep -q 'Reloop, the nested-Shell mechanic' "$ROOT/README.md"
+assert "README hero is text, not an image" sh -c \
+    '! grep -q "<img" "$1" && grep -q "<pre>" "$1"' sh "$ROOT/README.md"
+assert "Reloop mascot keeps its block-character face" grep -q '0x0' "$ROOT/assets/mascot.txt"
+assert "Reloop mascot carries a staff" grep -q '█──█' "$ROOT/assets/mascot.txt"
+assert "social preview is a PNG" sh -c \
+    'test "$(od -An -tx1 -N8 "$1" | tr -d " \n")" = 89504e470d0a1a0a' \
+    sh "$ROOT/assets/github-social-preview.png"
+assert "social preview is the only image asset" sh -c \
+    'test "$(find "$1/assets" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" -o -iname "*.gif" -o -iname "*.svg" \) -printf "%f\n")" = github-social-preview.png' \
+    sh "$ROOT"
+
+reserved_private_word="$(printf '\157\162\142')"
+if grep -RIl --exclude-dir=.git -i -- "$reserved_private_word" "$ROOT" | grep -q . ||
+   find "$ROOT" -path "$ROOT/.git" -prune -o -iname "*$reserved_private_word*" -print | grep -q .; then
+    fail "reserved private vocabulary stays absent"
+else
+    pass "reserved private vocabulary stays absent"
+fi
 
 agents_home="$TEST_TMP/agents"
 hermes_home="$TEST_TMP/hermes"
 state_home="$TEST_TMP/state"
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
-GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" >/dev/null
+GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" > "$TEST_TMP/install.out"
+assert "successful install prints alternate Reloop" grep -q '\^x\^' "$TEST_TMP/install.out"
+assert "successful install prints alternate staff pose" grep -q '^█───█' "$TEST_TMP/install.out"
 assert "local install creates Agent Skills copy" test -f "$agents_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install creates Hermes copy" test -f "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+assert "local install includes GNOME 50 debugging reference" \
+    test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
+assert "local install includes the Reloop mascot" \
+    test -f "$agents_home/skills/gnome-wayland-reload/assets/mascot.txt"
 assert "installed copy has managed marker" test -f "$agents_home/skills/gnome-wayland-reload/.gnome-wayland-reload-managed"
 assert "installed helper remains executable" test -x "$agents_home/skills/gnome-wayland-reload/scripts/dev-shell.sh"
+assert "installed hot-swap helper remains executable" \
+    test -x "$agents_home/skills/gnome-wayland-reload/scripts/looking-glass-hotswap.sh"
 
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
 GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" >/dev/null
-assert "installer is idempotent" test -f "$hermes_home/skills/gnome-wayland-reload/assets/orb.svg"
+assert "installer is idempotent" test -f "$hermes_home/skills/gnome-wayland-reload/assets/mascot.txt"
 
 backup_agents="$TEST_TMP/backup-agents"
 backup_hermes="$TEST_TMP/backup-hermes"
@@ -83,6 +109,10 @@ PATH="$mock_bin:/usr/bin:/bin" "$ROOT/scripts/recycle-extension.sh" test@example
 assert "recycle helper disables then enables" \
     test "$(tr '\n' ' ' < "$TEST_TMP/recycle.log")" = 'disable test@example.com enable test@example.com '
 assert "development helper exposes usage" "$ROOT/scripts/dev-shell.sh" --help
+assert "source inspector exposes usage" "$ROOT/scripts/inspect-shell-source.sh" --help
+assert "hot-swap helper emits the requested UUID" \
+    grep -q "const uuid = 'test@example.com';" \
+        <("$ROOT/scripts/looking-glass-hotswap.sh" test@example.com 2>/dev/null)
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

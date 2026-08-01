@@ -9,6 +9,17 @@ gext-devkit() {
     "$skill_home/scripts/dev-shell.sh" "$@"
 }
 
+gext-hotswap() {
+    local uuid="${1:?usage: gext-hotswap UUID}"
+    local skill_home="${GNOME_WAYLAND_RELOAD_HOME:-$HOME/.agents/skills/gnome-wayland-reload}"
+    "$skill_home/scripts/looking-glass-hotswap.sh" "$uuid"
+}
+
+gext-shell-source() {
+    local skill_home="${GNOME_WAYLAND_RELOAD_HOME:-$HOME/.agents/skills/gnome-wayland-reload}"
+    "$skill_home/scripts/inspect-shell-source.sh" "$@"
+}
+
 gext-logs() {
     local uuid="${1:-}"
     if [ -n "$uuid" ]; then
