@@ -4,17 +4,19 @@ When a user points at this repository and asks to install it:
 
 1. Read the Install section in `README.md`.
 2. Run `./install.sh` as the desktop user, never as root.
-3. Install both runtime copies by default. Narrow with `--agents-only` or
+3. Let the installer prepare `mutter-dev-bin` through `pkexec`. It enables a
+   fresh GNOME Shell test session in a window without restarting the real
+   desktop. Use `--skip-devkit` only when the user explicitly wants skill files
+   without the nested-Shell runner.
+4. Install both runtime copies by default. Narrow with `--agents-only` or
    `--hermes-only` only when the user asks.
-4. Report any unmanaged directory that the installer backed up.
-5. Ask the user to start a fresh agent session. For an active Hermes session,
+5. Report any unmanaged directory that the installer backed up.
+6. Ask the user to start a fresh agent session. For an active Hermes session,
    `/reload-skills` can rescan immediately.
 
-The installer does not install Ubuntu packages. `mutter-dev-bin` is required
-only for the nested development-Shell workflow and should be installed with
-the user's normal package-management approval. Prefer
-`pkexec apt-get install -y mutter-dev-bin` for an agent-driven graphical
-privilege prompt; do not open a general-purpose root shell.
+The installer requests privilege only for
+`pkexec apt-get install -y mutter-dev-bin`; do not open a general-purpose root
+shell or type the user's password.
 
 The repository root `SKILL.md` follows OpenAI Agent Skills metadata rules. The
 installer composes the Hermes copy with `runtimes/hermes-frontmatter.yaml`, so

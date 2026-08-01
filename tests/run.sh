@@ -68,11 +68,60 @@ else
     pass "reserved private vocabulary stays absent"
 fi
 
+install_help=$("$ROOT/install.sh" --help)
+assert "installer advertises integrated devkit setup" \
+    grep -q -- '--skip-devkit' <<< "$install_help"
+
+devkit_home="$TEST_TMP/devkit-home"
+devkit_bin="$TEST_TMP/devkit-bin"
+devkit_state="$TEST_TMP/devkit-installed"
+devkit_log="$TEST_TMP/pkexec.log"
+mkdir -p "$devkit_home" "$devkit_bin"
+cat > "$devkit_bin/dpkg-query" <<'SH'
+#!/usr/bin/env bash
+[ -f "$DEVKIT_STATE" ] || exit 1
+case "$*" in
+    *'${Status}'*) printf 'install ok installed' ;;
+    *'${Version}'*) printf '50.1-test' ;;
+    *) exit 1 ;;
+esac
+SH
+cat > "$devkit_bin/pkexec" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$PKEXEC_LOG"
+[ "$*" = 'apt-get install -y mutter-dev-bin' ] || exit 1
+: > "$DEVKIT_STATE"
+SH
+cat > "$devkit_bin/apt-get" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$devkit_bin/"*
+DEVKIT_STATE="$devkit_state" PKEXEC_LOG="$devkit_log" \
+HOME="$devkit_home" AGENTS_HOME="$devkit_home/.agents" \
+HERMES_HOME="$devkit_home/.hermes" \
+GNOME_WAYLAND_RELOAD_STATE_HOME="$devkit_home/state" \
+PATH="$devkit_bin:/usr/bin:/bin" \
+    "$ROOT/install.sh" --agents-only > "$TEST_TMP/devkit-install.out"
+assert "installer uses a narrow graphical package prompt" \
+    grep -qx 'apt-get install -y mutter-dev-bin' "$devkit_log"
+assert "installer verifies the installed development runner" \
+    grep -q 'Nested Shell development runner installed (50.1-test)' "$TEST_TMP/devkit-install.out"
+assert "installer explains the development runner simply" sh -c \
+    'grep -q "fresh GNOME Shell test sessions in a window" "$1" && grep -q "without logging out or restarting your real desktop" "$1"' \
+    sh "$TEST_TMP/devkit-install.out"
+assert "installer output uses three numbered phases" sh -c \
+    'grep -q "\[1/3\]" "$1" && grep -q "\[2/3\]" "$1" && grep -q "\[3/3\]" "$1"' \
+    sh "$TEST_TMP/devkit-install.out"
+assert "installer output reports launch and next actions" sh -c \
+    'grep -q "All done\." "$1" && grep -q "Launch:" "$1" && grep -q "Next:" "$1"' \
+    sh "$TEST_TMP/devkit-install.out"
+
 agents_home="$TEST_TMP/agents"
 hermes_home="$TEST_TMP/hermes"
 state_home="$TEST_TMP/state"
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
-GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" > "$TEST_TMP/install.out"
+GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" --skip-devkit > "$TEST_TMP/install.out"
 assert "successful install prints alternate Reloop" grep -q '\^x\^' "$TEST_TMP/install.out"
 assert "successful install prints alternate staff pose" grep -q '^█───█' "$TEST_TMP/install.out"
 assert "local install creates Agent Skills copy" test -f "$agents_home/skills/gnome-wayland-reload/SKILL.md"
@@ -82,7 +131,7 @@ assert "Agent install keeps OpenAI UI metadata" \
 assert "Hermes install omits OpenAI-only UI metadata" \
     test ! -e "$hermes_home/skills/gnome-wayland-reload/agents/openai.yaml"
 assert "Hermes install carries Hermes-native metadata" \
-    grep -q '^version: 2.2.0$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+    grep -q '^version: 2.3.0$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install includes GNOME 50 debugging reference" \
     test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
 assert "local install includes the Reloop mascot" \
@@ -102,20 +151,20 @@ update_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh" --force)
 assert "update checker reports a newer published version" \
-    grep -q '2.2.0 -> 9.9.9' <<< "$update_out"
+    grep -q '2.3.0 -> 9.9.9' <<< "$update_out"
 printf '0.0.1\n' > "$update_remote/VERSION"
 cached_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh")
 assert "update checker caches the successful lookup" \
-    grep -q '2.2.0 -> 9.9.9' <<< "$cached_out"
+    grep -q '2.3.0 -> 9.9.9' <<< "$cached_out"
 offline_out=$(GNOME_WAYLAND_RELOAD_BASE_URL='file:///does-not-exist' \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$TEST_TMP/offline-state" \
     "$ROOT/scripts/check-update.sh" --force --quiet)
 assert "offline quiet update checks are nonfatal" test -z "$offline_out"
 
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
-GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" >/dev/null
+GNOME_WAYLAND_RELOAD_STATE_HOME="$state_home" "$ROOT/install.sh" --skip-devkit >/dev/null
 assert "installer is idempotent" test -f "$hermes_home/skills/gnome-wayland-reload/assets/mascot.txt"
 
 backup_agents="$TEST_TMP/backup-agents"
@@ -124,7 +173,7 @@ backup_state="$TEST_TMP/backup-state"
 mkdir -p "$backup_agents/skills/gnome-wayland-reload"
 printf 'original\n' > "$backup_agents/skills/gnome-wayland-reload/original.txt"
 AGENTS_HOME="$backup_agents" HERMES_HOME="$backup_hermes" \
-GNOME_WAYLAND_RELOAD_STATE_HOME="$backup_state" "$ROOT/install.sh" --agents-only >/dev/null
+GNOME_WAYLAND_RELOAD_STATE_HOME="$backup_state" "$ROOT/install.sh" --agents-only --skip-devkit >/dev/null
 AGENTS_HOME="$backup_agents" HERMES_HOME="$backup_hermes" \
 GNOME_WAYLAND_RELOAD_STATE_HOME="$backup_state" "$ROOT/uninstall.sh" --agents-only --restore >/dev/null
 assert "uninstall --restore recovers an unmanaged prior skill" \
@@ -135,7 +184,7 @@ remote_hermes="$TEST_TMP/remote-hermes"
 remote_state="$TEST_TMP/remote-state"
 AGENTS_HOME="$remote_agents" HERMES_HOME="$remote_hermes" \
 GNOME_WAYLAND_RELOAD_STATE_HOME="$remote_state" \
-GNOME_WAYLAND_RELOAD_BASE_URL="file://$ROOT" bash < "$ROOT/install.sh" >/dev/null
+GNOME_WAYLAND_RELOAD_BASE_URL="file://$ROOT" bash -s -- --skip-devkit < "$ROOT/install.sh" >/dev/null
 assert "curl-pipe mode fetches the full bundle" test -f "$remote_agents/skills/gnome-wayland-reload/scripts/recycle-extension.sh"
 
 AGENTS_HOME="$agents_home" HERMES_HOME="$hermes_home" \
@@ -158,6 +207,28 @@ PATH="$mock_bin:/usr/bin:/bin" "$ROOT/scripts/recycle-extension.sh" test@example
 assert "recycle helper disables then enables" \
     test "$(tr '\n' ' ' < "$TEST_TMP/recycle.log")" = 'disable test@example.com enable test@example.com '
 assert "development helper exposes usage" "$ROOT/scripts/dev-shell.sh" --help
+dev_shell_bin="$TEST_TMP/dev-shell-bin"
+mkdir -p "$dev_shell_bin"
+cat > "$dev_shell_bin/gnome-shell" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' 'Usage: gnome-shell --devkit --wayland'
+SH
+cat > "$dev_shell_bin/dbus-run-session" <<'SH'
+#!/usr/bin/env bash
+exit 99
+SH
+cat > "$dev_shell_bin/dpkg-query" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$dev_shell_bin/"*
+dev_shell_rc=0
+PATH="$dev_shell_bin:/usr/bin:/bin" "$ROOT/scripts/dev-shell.sh" \
+    > /dev/null 2> "$TEST_TMP/dev-shell-missing.err" || dev_shell_rc=$?
+assert "development helper refuses an incomplete runner" test "$dev_shell_rc" -ne 0
+assert "development helper explains how to enable nested testing" sh -c \
+    'grep -q "fresh GNOME Shell test sessions in a window" "$1" && grep -q "pkexec apt-get install -y mutter-dev-bin" "$1"' \
+    sh "$TEST_TMP/dev-shell-missing.err"
 assert "source inspector exposes usage" "$ROOT/scripts/inspect-shell-source.sh" --help
 assert "hot-swap helper emits the requested UUID" \
     grep -q "const uuid = 'test@example.com';" \

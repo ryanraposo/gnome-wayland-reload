@@ -42,9 +42,13 @@ Run as your normal desktop user—**not with `sudo`**:
 curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 ```
 
-The installer places complete, independent, runtime-native copies in both skill
-homes. The Agent Skills copy uses OpenAI's minimal skill metadata and UI file;
-the Hermes copy uses Hermes version, platform, tag, and related-skill metadata:
+The installer first prepares `mutter-dev-bin`, then places complete,
+independent, runtime-native copies in both skill homes. The development package
+enables fresh GNOME Shell test sessions in a window, so edited extension code
+can load without logging out or restarting your real desktop.
+
+The Agent Skills copy uses OpenAI's minimal skill metadata and UI file; the
+Hermes copy uses Hermes version, platform, tag, and related-skill metadata:
 
 ```text
 ~/.agents/skills/gnome-wayland-reload
@@ -58,6 +62,7 @@ backup under `~/.local/state/gnome-wayland-reload/backups/` before installation.
 |---|---|
 | `--agents-only` | Install only under `~/.agents/skills/` |
 | `--hermes-only` | Install only under `~/.hermes/skills/` |
+| `--skip-devkit` | Install skills without the Ubuntu nested-Shell package |
 | `--help` | Show installer usage |
 
 From a checkout:
@@ -104,13 +109,8 @@ intentional.
 
 ## The development loop
 
-Install the Ubuntu development runner once:
-
-```bash
-pkexec apt-get install -y mutter-dev-bin
-```
-
-Then launch a fresh, disposable Shell in a window:
+The main installer prepares the development runner. Launch a fresh, disposable
+Shell in a window:
 
 ```bash
 ~/.agents/skills/gnome-wayland-reload/scripts/dev-shell.sh

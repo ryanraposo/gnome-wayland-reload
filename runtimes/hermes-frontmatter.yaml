@@ -9,7 +9,7 @@ description: >-
   or the user asks whether Alt+F2 r, gnome-shell --replace, logout/login, or
   another Shell restart is safe or necessary. Do not use for ordinary GNOME
   app automation or unrelated screenshots.
-version: 2.2.0
+version: 2.3.0
 author: Ryan Raposo
 license: MIT
 platforms: [linux]

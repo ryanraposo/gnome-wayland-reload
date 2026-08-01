@@ -101,12 +101,17 @@ This is still not a fresh JavaScript process.
 
 ## Run a Fresh Nested Shell
 
-On Ubuntu 26.04, install the development runner if needed. For an agent-driven
-install, prefer the narrow graphical privilege prompt over a root shell:
+The project installer prepares Ubuntu's development runner as part of setup:
 
 ```bash
-pkexec apt-get install -y mutter-dev-bin
+curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 ```
+
+It installs `mutter-dev-bin` through a narrow graphical privilege prompt. This
+enables fresh GNOME Shell test sessions in a window, so edited extension code
+can load without logging out or restarting the real desktop. If a deliberately
+skill-only installation used `--skip-devkit`, install the runner later with
+`pkexec apt-get install -y mutter-dev-bin`.
 
 Launch a disposable GNOME 49+ / 50 development Shell:
 

@@ -23,6 +23,7 @@ if command -v dpkg-query >/dev/null 2>&1 &&
     report mutter-dev-bin installed
 else
     report mutter-dev-bin 'not installed (needed for devkit on Ubuntu)'
+    status=1
 fi
 
 case "$session_type" in

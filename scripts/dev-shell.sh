@@ -31,8 +31,11 @@ fi
 
 if command -v dpkg-query >/dev/null 2>&1 &&
    ! dpkg-query -W -f='${Status}' mutter-dev-bin 2>/dev/null | grep -q 'install ok installed'; then
-    echo "note: Ubuntu's development runner may be missing" >&2
-    echo "install it with: sudo apt install mutter-dev-bin" >&2
+    echo "error: Ubuntu's nested Shell development runner is not installed" >&2
+    echo "mutter-dev-bin enables fresh GNOME Shell test sessions in a window," >&2
+    echo "so edited extension code can load without restarting your real desktop." >&2
+    echo "install it with: pkexec apt-get install -y mutter-dev-bin" >&2
+    exit 1
 fi
 
 echo "Starting a disposable nested GNOME Shell; close its window to stop it." >&2
