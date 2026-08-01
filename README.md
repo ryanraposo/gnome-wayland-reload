@@ -11,8 +11,6 @@
 
 Fresh extension code. Disposable nested Shells. No ceremonial logout.
 
-<sub>Reloop, the nested-Shell mechanic.</sub>
-
 [Install](#install) · [Decision matrix](#decision-matrix) ·
 [Development loop](#the-development-loop) · [Host hot-swap](#advanced-host-hot-swap) ·
 [Uninstall](#uninstall)
