@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">gnome-wayland-reload</title>
+  <desc id="desc">A monochrome repository preview with a reload orb</desc>
+  <rect width="1280" height="640" fill="#fff"/>
+  <g transform="translate(110 112) scale(.81)">
+    <circle cx="256" cy="256" r="112" fill="#000"/>
+    <circle cx="256" cy="256" r="72" fill="#fff"/>
+    <path d="M112 250A145 145 0 0 1 349 139" fill="none" stroke="#000" stroke-width="30" stroke-linecap="round"/>
+    <path d="m344 92 69 33-63 43z" fill="#000"/>
+    <path d="M400 262A145 145 0 0 1 163 373" fill="none" stroke="#000" stroke-width="30" stroke-linecap="round"/>
+    <path d="m168 420-69-33 63-43z" fill="#000"/>
+    <path d="M226 256h60" stroke="#000" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <text x="560" y="270" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="60" font-weight="700" fill="#000">gnome-wayland-reload</text>
+  <text x="565" y="340" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="27" fill="#555">fresh extension code · no host restart</text>
+  <line x1="565" y1="382" x2="1115" y2="382" stroke="#000" stroke-width="4"/>
+</svg>
