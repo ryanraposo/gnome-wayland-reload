@@ -124,6 +124,7 @@ FILES=(
     assets/mascot.txt
     runtimes/hermes-frontmatter.yaml
     references/gnome-50-debugging-notes.md
+    references/skill-ux-contract.md
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
     scripts/diagnose.sh
