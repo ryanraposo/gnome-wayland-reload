@@ -1,19 +1,6 @@
 ---
 name: gnome-wayland-reload
-description: >-
-  Diagnose, develop, reload, and recover GNOME Shell extensions on GNOME
-  49–50 Wayland without killing the compositor. Use whenever a user asks to
-  reload, restart, or refresh an extension; says edited extension.js, imported
-  JavaScript, metadata.json, stylesheet.css, prefs.js, or GSettings schemas are
-  not taking effect; reports that disable/enable did not load new code, an
-  extension is ACTIVE or ERROR but its UI is missing, duplicated, stuck, or
-  behaving strangely, or animations reset after polling; needs GNOME Shell
-  logs, Looking Glass, a cache-busted host hot-swap, lifecycle cleanup, schema
-  compilation, or a nested gnome-shell --devkit session; needs to prove that
-  installed bytes are actually running; or asks whether Alt+F2 r,
-  gnome-shell --replace, logout/login, or another Shell restart is safe or
-  necessary on Wayland. Do not use for ordinary GNOME app automation or
-  screenshots unrelated to Shell-extension reload, development, or recovery.
+description: Reload GNOME Shell extensions safely on Wayland.
 ---
 
 # Reload GNOME Extensions on Wayland
@@ -26,6 +13,43 @@ never update the installed skill silently.
 Treat the host GNOME Shell as the Wayland compositor. It cannot be restarted
 in-place while preserving the graphical session. Prefer the smallest refresh
 that can actually load the changed artifact.
+
+Use this skill when edited extension code is not taking effect, disable/enable did not load new code, a cache-busted host hot-swap is under consideration, or the user asks whether gnome-shell --replace, logout/login, or another restart is required. Do not use it for ordinary GNOME app automation.
+
+## Workflow Contract
+
+Take control when invoked. Classify the changed artifact, inspect the session
+and extension UUID, choose the smallest refresh boundary that can load it,
+execute one reversible step, then prove the new bytes are running.
+
+Move through:
+
+1. **Classify** — identify the artifact, desired outcome, host or nested target,
+   and whether the problem is stale code or a runtime bug.
+2. **Inspect** — establish session type, Shell version, UUID, installed source,
+   extension state, and relevant logs.
+3. **Choose** — select one boundary: live setting, lifecycle cycle, preferences
+   process, schema consumer, guarded host hot-swap, fresh nested Shell, or host
+   logout/login.
+4. **Execute** — use the bundled helper or exact narrow command for that
+   boundary.
+5. **Verify** — prove installed bytes, fresh runtime evidence, and observable
+   behavior.
+6. **Recover or complete** — restore the prior state or change boundaries after
+   failure; otherwise report the result and evidence.
+
+Infer reversible, local, least-disruptive defaults. Ask only when the UUID,
+scope, destructive recovery, or authorization for a real host logout is
+materially unclear. Ask one question per decision and never more than three.
+Recommend and execute one path instead of presenting equivalent choices.
+
+For longer work, surface the active phase when starting, changing strategy, or
+requiring user action. Before installing a package, using private host internals,
+or ending the graphical session, state the exact effect and obtain the required
+authorization. Never equate a successful command with a loaded module.
+
+Read `references/skill-ux-contract.md` when choosing a mutation boundary,
+recovering from a partial reload, or deciding whether host logout is justified.
 
 ## Decide First
 
@@ -250,3 +274,11 @@ restart paths and do not provide an in-session GNOME 50 Wayland reload.
 If a fresh host process is truly required and a nested Shell cannot reproduce
 the issue, explain that logout/login is the remaining correct boundary. Never
 log the user out without explicit permission.
+
+## Completion Receipt
+
+Finish only when the changed artifact and selected refresh boundary match, the
+host compositor remains intact, and the new behavior is proved through installed
+bytes, fresh runtime evidence, and an observable result. Report the action,
+evidence, any rollback or recovery, remaining uncertainty, and one meaningful
+next action.
