@@ -18,6 +18,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      - name: Skill UX contract
+        run: bash ./tests/skill-ux.sh
       - name: Regression suite
         run: ./tests/run.sh
 
