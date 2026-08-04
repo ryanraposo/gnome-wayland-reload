@@ -31,6 +31,11 @@ This Agent Skill turns that hard boundary into a practical workflow:
 - inspect the right logs before escalating; and
 - reject host-killing restart folklore on Wayland.
 
+It owns the complete loop: classify the changed artifact, inspect the real
+session and UUID, choose the smallest boundary that can load it, execute one
+reversible step, then prove the installed bytes are running. Questions appear
+only at real target, risk, or host-logout boundaries.
+
 The repository targets **Ubuntu 26.04, GNOME Shell 50, and Wayland**, while the
 development runner also supports GNOME 49's `--devkit` workflow.
 
@@ -165,6 +170,10 @@ remains a fresh nested Shell. See
 for the guarded recipe, recovery limits, verification ladder, and runtime bugs
 that commonly look like stale code.
 
+The workflow contract for assumptions, phase transitions, mutation classes,
+failure budgets, and completion proof lives in
+[`references/skill-ux-contract.md`](references/skill-ux-contract.md).
+
 ## Commands to avoid on the host
 
 ```bash
@@ -182,6 +191,18 @@ provide an in-session GNOME 50 reload and may end the graphical session.
 Source [`examples/shell-functions.sh`](examples/shell-functions.sh) to add
 `gext-recycle`, `gext-devkit`, and `gext-logs` to an interactive Bash session.
 
+## Validate
+
+```bash
+bash ./tests/skill-ux.sh
+./tests/run.sh
+```
+
+The constitutional gate enforces the 48-character description, rich trigger
+coverage outside frontmatter, repository/runtime authority, installed decision
+reference, and version identity. The regression suite verifies installers,
+restoration, runtime-native payloads, helpers, and GNOME-specific safety rules.
+
 ## Uninstall
 
 ```bash
@@ -196,6 +217,7 @@ restore any unmanaged directories backed up by the latest installation.
 
 | Path | Purpose |
 |---|---|
+| `AGENTS.md` | Install, use, and maintenance guide for repository-aware agents |
 | `SKILL.md` | Canonical cross-agent workflow |
 | `install.sh` | Local and curl-pipe dual-runtime installer |
 | `uninstall.sh` | Marker-safe removal and optional restoration |
@@ -207,7 +229,9 @@ restore any unmanaged directories backed up by the latest installation.
 | `scripts/check-update.sh` | Cached, non-mutating release update check |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
 | `references/gnome-50-debugging-notes.md` | Host hot-swap caveats and GNOME 50 debugging findings |
+| `references/skill-ux-contract.md` | Reload phases, mutation boundaries, recovery, and proof |
 | `assets/mascot.txt` | Reloop, the nested-Shell mechanic and his reload staff |
+| `tests/skill-ux.sh` | Constitutional and metadata regression checks |
 | `tests/run.sh` | Installer and helper regression tests |
 | `agents/openai.yaml` | Skill-list UI metadata |
 
