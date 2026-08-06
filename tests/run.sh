@@ -131,7 +131,7 @@ assert "Agent install keeps OpenAI UI metadata" \
 assert "Hermes install omits OpenAI-only UI metadata" \
     test ! -e "$hermes_home/skills/gnome-wayland-reload/agents/openai.yaml"
 assert "Hermes install carries Hermes-native metadata" \
-    grep -q '^version: 2.3.1$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+    grep -q '^version: 2.3.3$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install includes GNOME 50 debugging reference" \
     test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
 assert "local install includes the Reloop mascot" \
@@ -151,13 +151,13 @@ update_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh" --force)
 assert "update checker reports a newer published version" \
-    grep -q '2.3.1 -> 9.9.9' <<< "$update_out"
+    grep -q '2.3.3 -> 9.9.9' <<< "$update_out"
 printf '0.0.1\n' > "$update_remote/VERSION"
 cached_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh")
 assert "update checker caches the successful lookup" \
-    grep -q '2.3.1 -> 9.9.9' <<< "$cached_out"
+    grep -q '2.3.3 -> 9.9.9' <<< "$cached_out"
 offline_out=$(GNOME_WAYLAND_RELOAD_BASE_URL='file:///does-not-exist' \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$TEST_TMP/offline-state" \
     "$ROOT/scripts/check-update.sh" --force --quiet)
