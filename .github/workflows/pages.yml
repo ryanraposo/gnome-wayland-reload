@@ -22,6 +22,10 @@ jobs:
         run: bash ./tests/skill-ux.sh
       - name: Regression suite
         run: ./tests/run.sh
+      - name: Agent hot-swap transaction
+        run: |
+          bash ./tests/hotswap-agent.sh
+          node ./tests/hotswap-payload.mjs
 
   deploy:
     if: github.event_name != 'pull_request'

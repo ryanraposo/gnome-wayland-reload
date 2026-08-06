@@ -182,7 +182,7 @@ curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 
 It installs `mutter-dev-bin` through a narrow graphical privilege prompt. This
 enables fresh GNOME Shell test sessions in a window, so edited extension code
-can load without logging out or restarting the real desktop. If a deliberately
+can load without logging out or restarting your real desktop. If a deliberately
 skill-only installation used `--skip-devkit`, install the runner later with
 `pkexec apt-get install -y mutter-dev-bin`.
 
@@ -209,50 +209,112 @@ shares the user's home directory and settings, and can still modify user data.
 
 ## Hot-Swap One Top-Level Module (Advanced)
 
-When a host-only state is expensive to recreate and the change is confined to
-the top-level `extension.js`, generate the canonical guarded Looking Glass
-payload and drive Looking Glass via `computer_use`:
+Use this only when host-session state is materially expensive to recreate, the
+change is confined to installed top-level `extension.js`, and the extension's
+cleanup is known to be reliable. The agent owns this as a strict state machine:
 
-1. Generate the payload:
-   ```bash
-   LOOKSGLASS_JQ="$(scripts/looking-glass-hotswap.sh "$UUID")"
-   ```
-2. Verify the stderr warning lines contain your `reload_token`.
-3. Use `computer_use` (preferably `mode='som'`) to drive these steps in sequence:
-   a. `key="alt+F2"` — opens the GNOME run-dialog overlay.
-   b. Type `lg` then `key="return"` — launches Looking Glass.
-   c. `capture(mode='som')` to locate the JavaScript evaluator input box
-      (usually labeled "JavaScript evaluation" or similar).
-   d. `click <evaluator_element_index>` then `type text="$LOOKSGLASS_JQ"`.
-   e. `key="return"` — execute the payload.
-   f. Capture again to confirm the evaluator shows the proof JSON or `undefined`
-      (LG evaluator suppresses long results; this is normal).
-   g. Verify the proof token appears in journal:
-      ```bash
-      journalctl --since '30 seconds ago' /usr/bin/gnome-shell | grep -i "$UUID"
-      ```
-4. If the journal confirms `ok=true` and the correct `reload_token`, the
-   hot-swap succeeded.
+```text
+PREPARED → OPEN_LOOKING_GLASS → EVALUATOR_LOCATED → PAYLOAD_INSERTED
+→ PAYLOAD_VERIFIED → EXECUTED → TOKEN_VERIFIED → BEHAVIOR_VERIFIED
+```
 
-Before any host hot-swap, deploy the updated source files into the extension directory
-(returned by `scripts/diagnose.sh` or `gnome-extensions info UUID`). Looking Glass
-imports from the installed location, not the git checkout. For GUI-typed payloads, use
-`looking-glass-hotswap.sh --one-line UUID` instead of the multiline variant.
+Do not skip, reorder, or silently infer a completed stage.
 
-Do not use this for imported modules, metadata, schemas, native code, repeated
-development cycles, or an extension whose cleanup is not known to be
-idempotent. Immediately verify the emitted token, `ACTIVE` state,
-`stateObjectReplaced`, fresh logs, and behavior. Use a fresh nested Shell if
-anything is uncertain. Treat an evaluator result of `undefined` as inconclusive,
-not failure: check the helper's proof token and a runtime marker unique to the
-new version before attempting another hot-swap.
+### Prepare a durable receipt
 
-The proof only establishes replacement of the top-level state object. If
-`extension.js` statically imports an edited relative module, the unchanged
-specifier still resolves to the module already cached by GJS; a successful
-proof does not mean that imported code changed. Use a fresh nested Shell, or a
-project-specific import-aware reload that gives every edited module a unique
-URI. Never repeat the top-level payload and claim the imported change loaded.
+After deploying the edited file and proving that source and installed bytes
+match, prepare the exact one-line payload:
+
+```bash
+PREPARED_JSON="$(scripts/looking-glass-hotswap.sh prepare "$UUID")"
+RECEIPT="$(python3 -c \
+  'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' \
+  "$PREPARED_JSON")"
+PAYLOAD="$(scripts/looking-glass-hotswap.sh show "$RECEIPT")"
+```
+
+`prepare` creates private `0600` payload and receipt files, records the UUID,
+unique token, exact marker, preparation timestamp, payload path, and SHA-256,
+and reports `status=PREPARED`. `show` refuses altered payload bytes or a receipt
+that has already advanced. Never hand-write, shorten, reformat, or regenerate
+the payload after preparation.
+
+### Drive Looking Glass through `computer_use`
+
+Prefer `mode='som'` and advance one observed stage at a time:
+
+1. Send `key="alt+F2"`; capture and confirm the GNOME run dialog is open.
+2. Type `lg`, send `key="return"`, then capture and confirm Looking Glass opened.
+3. Capture in SOM mode and locate the evaluator entry. Do not guess a stale
+   element index from an earlier capture.
+4. Click the current evaluator element and type the exact one-line `$PAYLOAD`.
+5. Capture before execution. Confirm the entry begins with the expected
+   `const uuid = '…';`, contains the receipt token, and ends with
+   `JSON.stringify(proof)`. Any truncation or mismatch means abort this attempt
+   without pressing Return.
+6. Send Return exactly once. Never retry the payload merely because the visible
+   evaluator result is truncated, `undefined`, or unclear.
+
+Treat an evaluator result of `undefined` as inconclusive; it is never proof and
+never permission to execute the payload again.
+
+If execution has not happened, close the workflow cleanly with:
+
+```bash
+scripts/looking-glass-hotswap.sh abort "$RECEIPT"
+```
+
+### Verify from the durable receipt
+
+After the single execution, run:
+
+```bash
+scripts/looking-glass-hotswap.sh verify "$RECEIPT"
+```
+
+The verifier searches Shell journal entries only from the recorded preparation
+time, requires the receipt's exact token marker, parses its structured proof,
+checks UUID and token equality, requires `stateObjectReplaced=true`, requires
+extension-order bookkeeping restoration, and independently requires
+`gnome-extensions info` to report `ACTIVE`.
+
+Interpret its exit status and persisted receipt literally:
+
+- `0 / VERIFIED` — transaction proof is complete; continue to observable
+  behavior verification.
+- `1 / FAILED` — the exact invocation ran but replacement or proof failed. Read
+  `journal_proof.phase` and `journal_proof.rollback`; do not execute again.
+- `3 / INCONCLUSIVE` — no exact token proof was found. Inspect the receipt and
+  journal, preserve evidence, and do not execute another cache-busted import.
+
+The generated transaction refuses a target that is not already `ACTIVE`, lacks
+a live state object, is absent from extension order, or does not expose the
+expected private manager methods. Import and construction occur before host
+mutation. A replacement-enable failure attempts and proves restoration of the
+previous state object, `ACTIVE` state, and extension-order bookkeeping. If the
+current instance fails while disabling, the receipt explicitly requires manual
+recovery; it never calls that an automatic rollback success.
+
+GNOME's disable path may temporarily cycle extensions ordered after the target.
+The payload restores manager order bookkeeping, but it cannot erase arbitrary
+side effects produced by another extension's lifecycle methods. Treat those as
+part of the remaining behavioral proof.
+
+Before completion, verify a runtime marker or behavior unique to the new code.
+The receipt proves the exact top-level state-object transaction; it does not
+prove that a statically imported relative module changed. A successful proof
+does not mean that imported code changed. For imported modules, metadata,
+schemas, native code, process globals, repeated iteration, or any ambiguous
+result, move to a fresh nested Shell. Never repeat the top-level payload and
+claim that cached imported code changed.
+
+For direct human inspection, the generator still supports:
+
+```bash
+scripts/looking-glass-hotswap.sh --one-line UUID
+```
+
+The receipt-backed `prepare → show → verify` path is canonical for agents.
 
 ## Reload Preferences and Schemas
 

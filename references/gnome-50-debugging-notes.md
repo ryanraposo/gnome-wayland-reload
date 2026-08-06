@@ -46,88 +46,110 @@ This is an unsupported diagnostic technique, not a normal deployment path:
 - a query on `extension.js` does not cache-bust its normal relative imports;
 - it does not refresh metadata, schemas, native libraries, or process globals;
 - a constructor or `enable()` failure can leave the extension inactive or in
-  an error state; and
-- disabling one extension may temporarily cycle extensions ordered after it.
+  an error state;
+- disabling one extension may temporarily cycle extensions ordered after it;
+  and
+- lifecycle methods in those extensions may produce side effects that restoring
+  manager bookkeeping cannot undo.
 
 Use it only for a small, understood top-level change when preserving the host
 session is important. Prefer a nested Shell for repeatable testing.
 
-Generate the guarded snippet with:
+### Receipt-backed agent execution
+
+The generated JavaScript is intentionally treated as machinery, not prose. An
+agent prepares one immutable one-line payload and a durable receipt:
+
+```bash
+PREPARED_JSON="$(scripts/looking-glass-hotswap.sh prepare "$UUID")"
+RECEIPT="$(python3 -c \
+  'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' \
+  "$PREPARED_JSON")"
+PAYLOAD="$(scripts/looking-glass-hotswap.sh show "$RECEIPT")"
+```
+
+The receipt records the UUID, unique token, exact journal marker, preparation
+time, payload path, and SHA-256. Both files are created with mode `0600`.
+`show` verifies the payload hash and receipt state before emitting the exact
+one-line evaluator text.
+
+Use `computer_use` to open Looking Glass, locate the current evaluator entry,
+type the complete `$PAYLOAD`, capture the entry, and verify its beginning,
+receipt token, and final `JSON.stringify(result)` before pressing Return. Execute
+once. A visually truncated, `undefined`, or ambiguous evaluator result is not a
+reason to execute again.
+
+After execution, verify through the receipt:
+
+```bash
+scripts/looking-glass-hotswap.sh verify "$RECEIPT"
+```
+
+The verifier searches only journal entries after the recorded preparation time
+and requires the exact token marker. It parses the structured transaction proof,
+checks UUID and token equality, requires the replacement state object and
+restored extension-order bookkeeping, and separately requires
+`gnome-extensions info` to report `ACTIVE`.
+
+The result is persisted as one of:
+
+- `VERIFIED` — exact transaction proof plus active state; continue to behavior
+  verification;
+- `FAILED` — the exact invocation ran and reported failure; inspect its phase
+  and rollback object without executing another payload; or
+- `INCONCLUSIVE` — the exact marker was not found; preserve the evidence and
+  inspect the journal instead of creating another module instance.
+
+If the prepared payload was never executed, close the receipt with:
+
+```bash
+scripts/looking-glass-hotswap.sh abort "$RECEIPT"
+```
+
+### Transaction boundaries
+
+The generated payload feature-detects the private manager methods and refuses
+before mutation unless the extension already has all of these properties:
+
+- it exists in the current manager;
+- its state is `ACTIVE`;
+- it has a live `stateObj`; and
+- its UUID appears in the manager's extension order.
+
+Import and construction occur before the working instance is disabled, so a
+syntax, import, or constructor error leaves the current state object untouched.
+After mutation begins, the payload records the exact phase.
+
+If replacement enablement fails after a clean transition to `INACTIVE`, it
+attempts replacement cleanup, restores the old state object, re-enables it, and
+proves old-object identity, `ACTIVE` state, and restored extension-order
+bookkeeping. If the current instance itself fails while disabling, the payload
+does not force an unsafe enable over an uncertain partial cleanup. It restores
+order bookkeeping, reports rollback failure, and explicitly requires manual
+recovery.
+
+GNOME's internal disable/enable sequence normally moves the target UUID to the
+end of `_extensionOrder`. The payload records that intermediate order and then
+restores the original bookkeeping position. This preserves future manager
+ordering, but does not pretend that already-executed lifecycle side effects in
+other extensions disappeared.
+
+For human inspection without a receipt, generate one line directly:
 
 ```bash
 scripts/looking-glass-hotswap.sh --one-line UUID
 ```
 
-Use `--one-line` for GUI typing or pasting; omit it for a human-readable copy.
-Open Looking Glass with `Alt`+`F2`, enter `lg`, select the JavaScript evaluator,
-and paste the complete generated payload. Verify its beginning and final
-`JSON.stringify(proof)` before submitting it. Its essential sequence is:
+The receipt-backed `prepare → show → verify` workflow is canonical for agents.
+The generated helper is the source of truth for the current private transaction;
+do not copy an old embedded JavaScript snippet from documentation.
 
-```javascript
-const uuid = 'UUID';
-const reloadToken = 'TOKEN';
-const manager = Main.extensionManager;
-const extension = manager.lookup(uuid);
-if (!extension)
-    throw new Error(`Extension not found: ${uuid}`);
-const {ExtensionState} = await import(
-    'resource:///org/gnome/shell/misc/extensionUtils.js'
-);
-const file = extension.dir.get_child('extension.js');
-const module = await import(`${file.get_uri()}?reload=${Date.now()}`);
-const nextState = new module.default({
-    ...extension.metadata,
-    dir: extension.dir,
-    path: extension.path,
-});
-const previousState = extension.stateObj;
-await manager._callExtensionDisable(uuid);
-extension.stateObj = nextState;
-await manager._callExtensionEnable(uuid);
-if (extension.state !== ExtensionState.ACTIVE || extension.stateObj !== nextState) {
-    try {
-        nextState.disable();
-    } catch (cleanupError) {
-        console.error('Replacement cleanup failed', cleanupError);
-    }
-    extension.stateObj = previousState;
-    manager._changeExtensionState(extension, ExtensionState.INACTIVE);
-    await manager._callExtensionEnable(uuid);
-    throw new Error('Hot-swap failed; attempted to restore previous state');
-}
-const proof = {
-    ok: true,
-    uuid,
-    token: reloadToken,
-    state: extension.state,
-    stateObjectReplaced: extension.stateObj === nextState,
-};
-console.log(`[gnome-wayland-reload] hot-swap proof ${JSON.stringify(proof)}`);
-JSON.stringify(proof)
-```
-
-Import and construction happen before the working instance is disabled, so a
-syntax or constructor error leaves it active. The later rollback is still
-best-effort. If the new instance partially created actors before failing, its
-own `enable()` error path must clean them up. The generated helper assigns a
-unique token and logs it only after `ACTIVE` and state-object replacement are
-both confirmed. Looking Glass can still display `undefined` after a long or
-multi-statement paste; that result alone is not a failure verdict. Before
-running another cache-busted import, verify the token in the journal and query
-a read-only field or behavior that only the new module exposes.
-
-After the experiment, verify state and fresh logs from a host terminal:
-
-```bash
-gnome-extensions info UUID
-journalctl --since '2 minutes ago' -o cat /usr/bin/gnome-shell |
-  grep -i -- 'UUID'
-```
-
-Do not repeatedly hot-swap for routine development; every unique URI adds
-another module to the long-lived compositor process and another lifecycle
-reset. Ambiguous screenshots are a reason to improve verification, not to
-repeat a swap that may already have succeeded.
+The proof only establishes replacement of the top-level state object. If
+`extension.js` statically imports an edited relative module, the unchanged
+specifier still resolves to the module already cached by GJS. A successful
+receipt therefore does not prove imported code changed. Use a fresh nested
+Shell, or a project-specific import-aware reload that gives every edited module
+a unique URI.
 
 ## Inspect the Code This GNOME Build Runs
 
