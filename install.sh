@@ -129,6 +129,7 @@ FILES=(
     scripts/dev-shell.sh
     scripts/diagnose.sh
     scripts/looking-glass-hotswap.sh
+    scripts/host-login-proof.sh
     scripts/inspect-shell-source.sh
     scripts/check-update.sh
 )
