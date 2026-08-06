@@ -28,7 +28,7 @@ jobs:
           node ./tests/hotswap-payload.mjs
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
