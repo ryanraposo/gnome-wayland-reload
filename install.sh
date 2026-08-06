@@ -198,6 +198,15 @@ install_target() {
         rm -f "$temp_target/.skill-body"
         rm -rf "$temp_target/agents" "$temp_target/runtimes"
     else
+        cat >"$temp_target/.openai-frontmatter.yaml" <<'EOF'
+---
+name: gnome-wayland-reload
+description: Reload GNOME extensions on Wayland without restarting the compositor.
+---
+EOF
+        tail -n +3 "$stage/SKILL.md" | awk '/^---$/{s++;next} s>=2{exit}1' \
+            >>"$temp_target/.openai-frontmatter.yaml"
+        mv "$temp_target/.openai-frontmatter.yaml" "$temp_target/SKILL.md"
         rm -rf "$temp_target/runtimes"
     fi
     printf 'managed-by=%s\nsource=https://github.com/ryanraposo/%s\n' \

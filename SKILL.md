@@ -14,15 +14,6 @@ description: >-
   gnome-shell --replace, logout/login, or another Shell restart is safe or
   necessary on Wayland. Do not use for ordinary GNOME app automation or
   screenshots unrelated to Shell-extension reload, development, or recovery.
-version: 2.3.3
-author: Ryan Raposo
-license: MIT
-platforms: [linux]
-metadata:
-  hermes:
-    tags: [gnome, wayland, extensions, development, debugging, linux]
-    category: software-development
-    related_skills: [computer-use]
 ---
 
 # Reload GNOME Extensions on Wayland
@@ -243,9 +234,10 @@ payload and drive Looking Glass via `computer_use`:
 4. If the journal confirms `ok=true` and the correct `reload_token`, the
    hot-swap succeeded.
 
-Before any hot-swap, deploy the updated source files into the extension directory
+Before any host hot-swap, deploy the updated source files into the extension directory
 (returned by `scripts/diagnose.sh` or `gnome-extensions info UUID`). Looking Glass
-imports from the installed location, not the git checkout.
+imports from the installed location, not the git checkout. For GUI-typed payloads, use
+`looking-glass-hotswap.sh --one-line UUID` instead of the multiline variant.
 
 Do not use this for imported modules, metadata, schemas, native code, repeated
 development cycles, or an extension whose cleanup is not known to be
