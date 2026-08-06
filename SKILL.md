@@ -254,6 +254,11 @@ Prefer `mode='som'` and advance one observed stage at a time:
    without pressing Return.
 6. Send Return exactly once. Never retry the payload merely because the visible
    evaluator result is truncated, `undefined`, or unclear.
+7. Immediately record the one-shot submission:
+   ```bash
+   scripts/looking-glass-hotswap.sh executed "$RECEIPT"
+   ```
+   This closes the abort window and advances the receipt to `EXECUTED`.
 
 Treat an evaluator result of `undefined` as inconclusive; it is never proof and
 never permission to execute the payload again.
@@ -264,19 +269,23 @@ If execution has not happened, close the workflow cleanly with:
 scripts/looking-glass-hotswap.sh abort "$RECEIPT"
 ```
 
+`abort` is valid only while the receipt is `PREPARED`. Once Return has been
+pressed, record `executed` even if the evaluator output is unclear.
+
 ### Verify from the durable receipt
 
-After the single execution, run:
+After recording the single execution, run:
 
 ```bash
 scripts/looking-glass-hotswap.sh verify "$RECEIPT"
 ```
 
-The verifier searches Shell journal entries only from the recorded preparation
-time, requires the receipt's exact token marker, parses its structured proof,
-checks UUID and token equality, requires `stateObjectReplaced=true`, requires
-extension-order bookkeeping restoration, and independently requires
-`gnome-extensions info` to report `ACTIVE`.
+The verifier accepts only `EXECUTED` or previously `INCONCLUSIVE` receipts. It
+searches current-boot Shell journal entries from the recorded preparation time,
+requires the receipt's exact token marker, parses its structured proof, checks
+UUID and token equality, requires `phase=complete`,
+`stateObjectReplaced=true`, extension-order bookkeeping restoration, and an
+independent `gnome-extensions info` state of `ACTIVE`.
 
 Interpret its exit status and persisted receipt literally:
 
@@ -284,16 +293,20 @@ Interpret its exit status and persisted receipt literally:
   behavior verification.
 - `1 / FAILED` — the exact invocation ran but replacement or proof failed. Read
   `journal_proof.phase` and `journal_proof.rollback`; do not execute again.
-- `3 / INCONCLUSIVE` — no exact token proof was found. Inspect the receipt and
-  journal, preserve evidence, and do not execute another cache-busted import.
+- `2` — usage, receipt, dependency, or integrity error. If Return was already
+  pressed, preserve the receipt and do not execute again.
+- `3 / INCONCLUSIVE` — exact proof is absent or malformed. Inspect the receipt
+  and journal, then safely rerun `verify` against the same receipt. Never rerun
+  the payload.
 
 The generated transaction refuses a target that is not already `ACTIVE`, lacks
 a live state object, is absent from extension order, or does not expose the
 expected private manager methods. Import and construction occur before host
 mutation. A replacement-enable failure attempts and proves restoration of the
-previous state object, `ACTIVE` state, and extension-order bookkeeping. If the
-current instance fails while disabling, the receipt explicitly requires manual
-recovery; it never calls that an automatic rollback success.
+previous state object, `ACTIVE` state, replacement cleanup, and extension-order
+bookkeeping. Failure to restore bookkeeping fails closed and enters rollback.
+If the current instance fails while disabling, the receipt explicitly requires
+manual recovery; it never calls that an automatic rollback success.
 
 GNOME's disable path may temporarily cycle extensions ordered after the target.
 The payload restores manager order bookkeeping, but it cannot erase arbitrary
@@ -314,7 +327,8 @@ For direct human inspection, the generator still supports:
 scripts/looking-glass-hotswap.sh --one-line UUID
 ```
 
-The receipt-backed `prepare → show → verify` path is canonical for agents.
+The receipt-backed `prepare → show → executed → verify` path is canonical for
+agents.
 
 ## Reload Preferences and Schemas
 
