@@ -207,6 +207,46 @@ desktop.
 Treat the nested Shell as disposable, not sandboxed. It has little isolation,
 shares the user's home directory and settings, and can still modify user data.
 
+## Prove a Fresh Host Load by Logging Out
+
+When the user is willing to log out and back in, automate the host proof instead
+of handing them UUID placeholders, marker edits, backup commands, or deployment
+steps. Run the bundled transaction against the extension source directory:
+
+```bash
+bash scripts/host-login-proof.sh prepare EXTENSION_SOURCE_DIR
+```
+
+`prepare` reads the UUID from `metadata.json`, identifies the user installation,
+snapshots whatever is currently there (absent path, directory, or development
+symlink), preserves its enabled state, stages a private copy with a unique
+top-level journal marker, and deploys it atomically. It never edits the source
+tree. The receipt records the source and staged hashes plus the current GNOME
+Shell process identity, then prints the exact post-login command.
+
+After the user logs out and back in, run:
+
+```bash
+bash scripts/host-login-proof.sh verify
+```
+
+`verify` refuses the old Shell process, enables the extension only when needed
+for proof, requires `ACTIVE` state, requires the exact receipt marker in the
+current-boot Shell journal, and requires the installed staged hash. On success
+it restores the exact marker-free proof bytes, the prior enabled state, and a
+prior development symlink when the source stayed unchanged. The resulting
+`VERIFIED` receipt is the host-process proof.
+
+If preparation or verification exposes a broken deployment, restore the complete
+pre-test installation and enabled state with:
+
+```bash
+bash scripts/host-login-proof.sh restore
+```
+
+Use this fresh-process route whenever logout/login is acceptable. Do not make the
+user manually inject a marker or reconstruct the installed path.
+
 ## Hot-Swap One Top-Level Module (Advanced)
 
 Use this only when host-session state is materially expensive to recreate, the
