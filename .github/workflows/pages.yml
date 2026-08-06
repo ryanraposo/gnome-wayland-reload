@@ -26,6 +26,8 @@ jobs:
         run: |
           bash ./tests/hotswap-agent.sh
           node ./tests/hotswap-payload.mjs
+      - name: Fresh-login host proof transaction
+        run: bash ./tests/host-login-proof.sh
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
