@@ -131,7 +131,7 @@ assert "Agent install keeps OpenAI UI metadata" \
 assert "Hermes install omits OpenAI-only UI metadata" \
     test ! -e "$hermes_home/skills/gnome-wayland-reload/agents/openai.yaml"
 assert "Hermes install carries Hermes-native metadata" \
-    grep -q '^version: 2.3.0$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+    grep -q '^version: 2.3.1$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install includes GNOME 50 debugging reference" \
     test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
 assert "local install includes the Reloop mascot" \
@@ -151,13 +151,13 @@ update_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh" --force)
 assert "update checker reports a newer published version" \
-    grep -q '2.3.0 -> 9.9.9' <<< "$update_out"
+    grep -q '2.3.1 -> 9.9.9' <<< "$update_out"
 printf '0.0.1\n' > "$update_remote/VERSION"
 cached_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh")
 assert "update checker caches the successful lookup" \
-    grep -q '2.3.0 -> 9.9.9' <<< "$cached_out"
+    grep -q '2.3.1 -> 9.9.9' <<< "$cached_out"
 offline_out=$(GNOME_WAYLAND_RELOAD_BASE_URL='file:///does-not-exist' \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$TEST_TMP/offline-state" \
     "$ROOT/scripts/check-update.sh" --force --quiet)
@@ -233,6 +233,29 @@ assert "source inspector exposes usage" "$ROOT/scripts/inspect-shell-source.sh" 
 assert "hot-swap helper emits the requested UUID" \
     grep -q "const uuid = 'test@example.com';" \
         <("$ROOT/scripts/looking-glass-hotswap.sh" test@example.com 2>/dev/null)
+hot_swap_out=$("$ROOT/scripts/looking-glass-hotswap.sh" test@example.com 2> "$TEST_TMP/hot-swap.err")
+assert "hot-swap helper proves state-object replacement" sh -c \
+    'printf "%s\n" "$1" | grep -q "stateObjectReplaced: extension.stateObj === nextState" && printf "%s\n" "$1" | grep -q "hot-swap proof"' \
+    sh "$hot_swap_out"
+assert "hot-swap helper emits a unique verification token" sh -c \
+    'grep -Eq "proof: expect ok=true and token=[0-9]+-[0-9]+" "$1" && printf "%s\n" "$2" | grep -Eq "const reloadToken = '\''[0-9]+-[0-9]+'\'';"' \
+    sh "$TEST_TMP/hot-swap.err" "$hot_swap_out"
+hot_swap_one_line=$("$ROOT/scripts/looking-glass-hotswap.sh" --one-line test@example.com 2>/dev/null)
+assert "hot-swap helper emits a complete single-line evaluator payload" sh -c \
+    'test "$(printf "%s" "$1" | wc -l)" -eq 0 && printf "%s" "$1" | grep -q "^const uuid = .*JSON.stringify(proof)$"' \
+    sh "$hot_swap_one_line"
+assert "skill routes no-logout host reloads to Looking Glass, not soft cycle" sh -c \
+    'grep -q "reload without logout/login" "$1" && grep -q "Do not silently substitute a soft cycle" "$1" && grep -q -- "--one-line UUID" "$1"' \
+    sh "$ROOT/SKILL.md"
+assert "skill requires deploy before Looking Glass and rejects cached-import false proof" sh -c \
+    'grep -q "deploy bytes first, hot-swap second" "$1" && grep -q "proof does not mean that imported code changed" "$1"' \
+    sh "$ROOT/SKILL.md"
+assert "skill warns that undefined evaluator output is inconclusive" sh -c \
+    'grep -q "evaluator result" "$1" && grep -q "undefined.*inconclusive" "$1"' \
+    sh "$ROOT/SKILL.md"
+assert "skill guards against animation sampling aliases" sh -c \
+    'grep -q "one loop period" "$1" && grep -q "can look identical" "$1"' \
+    sh "$ROOT/SKILL.md"
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

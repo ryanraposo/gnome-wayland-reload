@@ -25,9 +25,12 @@ Check the layers separately:
 5. Prove the new behavior is running with a visible change, a temporary unique
    log marker, or another observation that only the new code can produce.
 
-For motion defects, capture multiple frames over longer than the extension's
-polling interval. A single screenshot cannot distinguish a smooth animation
-from one that periodically snaps back to its origin.
+For motion defects, combine structural and temporal proof. Inspect a timer,
+transition, frame counter, or field that exists only in the new implementation,
+then capture the target crop at three or more deliberately non-harmonic
+offsets. Sampling at or near the loop period aliases motion: an eight-frame
+animation at 125 ms per frame can look identical in captures one second apart.
+If frames match, change the cadence before concluding that the actor is static.
 
 ## Experimental Looking Glass Hot-Swap
 
@@ -52,16 +55,21 @@ session is important. Prefer a nested Shell for repeatable testing.
 Generate the guarded snippet with:
 
 ```bash
-scripts/looking-glass-hotswap.sh UUID
+scripts/looking-glass-hotswap.sh --one-line UUID
 ```
 
+Use `--one-line` for GUI typing or pasting; omit it for a human-readable copy.
 Open Looking Glass with `Alt`+`F2`, enter `lg`, select the JavaScript evaluator,
-and paste the generated code. Its essential sequence is:
+and paste the complete generated payload. Verify its beginning and final
+`JSON.stringify(proof)` before submitting it. Its essential sequence is:
 
 ```javascript
 const uuid = 'UUID';
+const reloadToken = 'TOKEN';
 const manager = Main.extensionManager;
 const extension = manager.lookup(uuid);
+if (!extension)
+    throw new Error(`Extension not found: ${uuid}`);
 const {ExtensionState} = await import(
     'resource:///org/gnome/shell/misc/extensionUtils.js'
 );
@@ -76,7 +84,7 @@ const previousState = extension.stateObj;
 await manager._callExtensionDisable(uuid);
 extension.stateObj = nextState;
 await manager._callExtensionEnable(uuid);
-if (extension.state !== ExtensionState.ACTIVE) {
+if (extension.state !== ExtensionState.ACTIVE || extension.stateObj !== nextState) {
     try {
         nextState.disable();
     } catch (cleanupError) {
@@ -87,14 +95,28 @@ if (extension.state !== ExtensionState.ACTIVE) {
     await manager._callExtensionEnable(uuid);
     throw new Error('Hot-swap failed; attempted to restore previous state');
 }
-extension.state;
+const proof = {
+    ok: true,
+    uuid,
+    token: reloadToken,
+    state: extension.state,
+    stateObjectReplaced: extension.stateObj === nextState,
+};
+console.log(`[gnome-wayland-reload] hot-swap proof ${JSON.stringify(proof)}`);
+JSON.stringify(proof)
 ```
 
 Import and construction happen before the working instance is disabled, so a
 syntax or constructor error leaves it active. The later rollback is still
 best-effort. If the new instance partially created actors before failing, its
-own `enable()` error path must clean them up. After the experiment, verify
-state and fresh logs from a host terminal:
+own `enable()` error path must clean them up. The generated helper assigns a
+unique token and logs it only after `ACTIVE` and state-object replacement are
+both confirmed. Looking Glass can still display `undefined` after a long or
+multi-statement paste; that result alone is not a failure verdict. Before
+running another cache-busted import, verify the token in the journal and query
+a read-only field or behavior that only the new module exposes.
+
+After the experiment, verify state and fresh logs from a host terminal:
 
 ```bash
 gnome-extensions info UUID
@@ -103,7 +125,9 @@ journalctl --since '2 minutes ago' -o cat /usr/bin/gnome-shell |
 ```
 
 Do not repeatedly hot-swap for routine development; every unique URI adds
-another module to the long-lived compositor process.
+another module to the long-lived compositor process and another lifecycle
+reset. Ambiguous screenshots are a reason to improve verification, not to
+repeat a swap that may already have succeeded.
 
 ## Inspect the Code This GNOME Build Runs
 

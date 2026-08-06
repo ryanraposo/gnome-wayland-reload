@@ -1,6 +1,28 @@
 ---
 name: gnome-wayland-reload
-description: Reload GNOME Shell extensions safely on Wayland.
+description: >-
+  Diagnose, develop, reload, and recover GNOME Shell extensions on GNOME
+  49–50 Wayland without killing the compositor. Use whenever a user asks to
+  reload, restart, or refresh an extension; says edited extension.js, imported
+  JavaScript, metadata.json, stylesheet.css, prefs.js, or GSettings schemas are
+  not taking effect; reports that disable/enable did not load new code, an
+  extension is ACTIVE or ERROR but its UI is missing, duplicated, stuck, or
+  behaving strangely, or animations reset after polling; needs GNOME Shell
+  logs, Looking Glass, a cache-busted host hot-swap, lifecycle cleanup, schema
+  compilation, or a nested gnome-shell --devkit session; needs to prove that
+  installed bytes are actually running; or asks whether Alt+F2 r,
+  gnome-shell --replace, logout/login, or another Shell restart is safe or
+  necessary on Wayland. Do not use for ordinary GNOME app automation or
+  screenshots unrelated to Shell-extension reload, development, or recovery.
+version: 2.3.3
+author: Ryan Raposo
+license: MIT
+platforms: [linux]
+metadata:
+  hermes:
+    tags: [gnome, wayland, extensions, development, debugging, linux]
+    category: software-development
+    related_skills: [computer-use]
 ---
 
 # Reload GNOME Extensions on Wayland
@@ -60,7 +82,7 @@ recovering from a partial reload, or deciding whether host logout is justified.
 | `stylesheet.css` | Soft-cycle first |
 | `prefs.js` or preference-only imports | Close and reopen preferences |
 | `extension.js` or a Shell-side imported `.js` module | Fresh nested Shell; otherwise host logout/login |
-| Small top-level `extension.js` diagnostic that must preserve host state | Guarded Looking Glass hot-swap (advanced/private) |
+| Visible host extension, no logout/login, change confined to top-level `extension.js` | Guarded Looking Glass hot-swap (advanced/private) |
 | `metadata.json` | Fresh nested Shell; otherwise host logout/login |
 | GSettings schema XML | Compile schemas, then restart the process that consumes them |
 | Native library, typelib, or Shell process state | Fresh nested Shell; otherwise host logout/login |
@@ -75,6 +97,42 @@ relative imports. Keep the nested Shell as the supported development loop; use
 the hot-swap only when preserving current host-session state is materially
 useful. See `references/gnome-50-debugging-notes.md` for the guarded recipe and
 recovery limits.
+
+Treat "reload without logout/login," "reload the visible host extension," or
+an explicit request to use Looking Glass as a request for this guarded host
+hot-swap when the edited code is confined to top-level `extension.js` and
+cleanup is reliable. State that mechanism before acting. Do not silently substitute a soft cycle:
+it only reruns lifecycle methods and cannot load fresh Shell-side JavaScript.
+If imports, metadata, schemas, native code, or process
+globals changed, explain that Looking Glass cannot refresh them and use a fresh
+nested Shell while leaving the host session intact.
+
+Before any host hot-swap, sync or install the edited repo files into the
+extension directory returned by `manager.lookup(uuid).dir`, then compare the
+changed source and installed bytes. Looking Glass imports the installed copy;
+it does not deploy the checkout. Treat "reload + Looking Glass" as this ordered
+pair: deploy bytes first, hot-swap second.
+
+## Development Workflow
+
+For iterative editing of extension code, the fastest cycle uses a nested
+development Shell:
+
+1. Edit your source files (e.g., `extension.js`).
+2. Close the nested Shell window.
+3. Relaunch it: `scripts/dev-shell.sh`.
+4. Open Looking Glass (`Alt`+`F2`, type `lg`) → Extensions tab to verify
+   loaded state and errors.
+5. Check journal output: `journalctl --no-pager -u gnome-shell | grep -i UUID`.
+
+For quick iterations on top-level `extension.js` only, you can hot-swap without
+closing the nested Shell — see below. Imported modules never change via
+hot-swap (GJS caches relative specifiers); always relaunch the nested Shell.
+
+Verify changes across three layers: installed file hash matches source, journal
+shows a fresh load entry, and observable behavior confirms the update. Captures
+one animation loop period apart can look identical even when working — check at
+non-harmonic offsets.
 
 ## Establish the Target
 
@@ -161,21 +219,36 @@ shares the user's home directory and settings, and can still modify user data.
 ## Hot-Swap One Top-Level Module (Advanced)
 
 When a host-only state is expensive to recreate and the change is confined to
-the top-level `extension.js`, generate a guarded Looking Glass snippet:
+the top-level `extension.js`, generate the canonical guarded Looking Glass
+payload as one line:
 
 ```bash
-scripts/looking-glass-hotswap.sh UUID
+scripts/looking-glass-hotswap.sh --one-line UUID
 ```
 
-Open Looking Glass with `Alt`+`F2`, then `lg`, and paste the generated code into
-its JavaScript evaluator. The snippet disables the extension, dynamically
+Open Looking Glass with `Alt`+`F2`, enter `lg`, and paste or type that complete
+one-line payload into its JavaScript evaluator. Before pressing Enter, verify
+that the evaluator contains the payload's beginning and final
+`JSON.stringify(proof)`. The snippet disables the extension, dynamically
 imports `extension.js` with a unique query, constructs a new state object, and
-enables it. It retains the previous state object for a best-effort rollback.
+enables it. It retains the previous state object for a best-effort rollback and
+emits a unique proof token after the new object is active. The helper's normal
+mode remains multiline for human inspection.
 
 Do not use this for imported modules, metadata, schemas, native code, repeated
 development cycles, or an extension whose cleanup is not known to be
-idempotent. Immediately verify `ACTIVE` state, fresh logs, and behavior. Use a
-fresh nested Shell if anything is uncertain.
+idempotent. Immediately verify the emitted token, `ACTIVE` state,
+`stateObjectReplaced`, fresh logs, and behavior. Use a fresh nested Shell if
+anything is uncertain. Treat an evaluator result of `undefined` as inconclusive,
+not failure: check the helper's proof token and a runtime marker
+unique to the new version before attempting another hot-swap.
+
+The proof only establishes replacement of the top-level state object. If
+`extension.js` statically imports an edited relative module, the unchanged
+specifier still resolves to the module already cached by GJS; a successful
+proof does not mean that imported code changed. Use a fresh nested Shell, or a
+project-specific import-aware reload that gives every edited module a unique
+URI. Never repeat the top-level payload and claim the imported change loaded.
 
 ## Reload Preferences and Schemas
 
@@ -225,8 +298,10 @@ Glass still uses the cached module.
 Do not treat matching source and installed-file hashes as proof that those
 bytes are running. Verify three layers: the installed artifact, the extension's
 `ACTIVE` state and fresh journal entries, and an observable behavior or unique
-diagnostic marker from the new code. For animation bugs, capture several frames
-across more than one polling interval so a periodic reset is visible.
+diagnostic marker from the new code. For animation bugs, combine a structural
+check (timer, transition, frame counter, or new-version field) with at least
+three target-cropped captures at non-harmonic offsets. Captures one loop period
+apart can look identical even when animation is working.
 
 ## Separate Reload Failures from Runtime Bugs
 
