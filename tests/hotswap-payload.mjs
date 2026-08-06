@@ -6,7 +6,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const script = path.resolve(here, '../scripts/looking-glass-hotswap.sh');
+const script = process.env.HOTSWAP_SCRIPT ??
+    path.resolve(here, '../scripts/looking-glass-hotswap.sh');
 const uuid = 'test@example.com';
 const token = 'behavior-token';
 
@@ -29,6 +30,7 @@ async function executeScenario({
     oldDisableFails = false,
     replacementEnableFails = false,
     replacementDisableFails = false,
+    orderInterference = false,
 } = {}) {
     const calls = [];
     const oldState = {
@@ -120,6 +122,8 @@ async function executeScenario({
                 await extension.stateObj.enable();
                 extension.state = ExtensionState.ACTIVE;
                 this._extensionOrder.push(candidate);
+                if (orderInterference && extension.stateObj !== oldState)
+                    this._extensionOrder.push('surprise@example.com');
             } catch {
                 extension.state = ExtensionState.ERROR;
             }
@@ -198,6 +202,7 @@ async function executeScenario({
     assert.equal(result.proof.rollback.needed, true);
     assert.equal(result.proof.rollback.attempted, true);
     assert.equal(result.proof.rollback.ok, true);
+    assert.equal(result.proof.rollback.replacementCleanupOk, true);
     assert.equal(result.proof.rollback.stateObjectRestored, true);
     assert.equal(result.proof.rollback.activeStateRestored, true);
     assert.equal(result.proof.rollback.orderBookkeepingRestored, true);
@@ -209,6 +214,34 @@ async function executeScenario({
         'after@example.com',
     ]);
     console.log('ok - replacement enable failure proves complete rollback');
+}
+
+{
+    const result = await executeScenario({
+        replacementEnableFails: true,
+        replacementDisableFails: true,
+    });
+    assert.equal(result.proof.ok, false);
+    assert.equal(result.proof.phase, 'enable-replacement');
+    assert.equal(result.proof.rollback.replacementCleanupAttempted, true);
+    assert.equal(result.proof.rollback.replacementCleanupOk, false);
+    assert.equal(result.proof.rollback.stateObjectRestored, true);
+    assert.equal(result.proof.rollback.activeStateRestored, true);
+    assert.equal(result.proof.rollback.ok, false);
+    assert.match(result.proof.rollback.error, /replacement cleanup/);
+    console.log('ok - replacement cleanup failure can never be called a complete rollback');
+}
+
+{
+    const result = await executeScenario({orderInterference: true});
+    assert.equal(result.proof.ok, false);
+    assert.equal(result.proof.phase, 'restore-order');
+    assert.equal(result.proof.rollback.needed, true);
+    assert.equal(result.proof.rollback.ok, false);
+    assert.equal(result.proof.stateObjectReplaced, false);
+    assert.equal(result.extension.stateObj, result.oldState);
+    assert.equal(result.extension.state, ExtensionState.ACTIVE);
+    console.log('ok - bookkeeping mismatch fails the transaction and attempts rollback');
 }
 
 {
