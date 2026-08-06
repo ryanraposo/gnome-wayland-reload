@@ -34,6 +34,9 @@ From a checkout, helpers are available directly:
 ./scripts/diagnose.sh
 ./scripts/recycle-extension.sh UUID
 ./scripts/dev-shell.sh
+./scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+./scripts/looking-glass-hotswap.sh prepare UUID    # receipt lifecycle
+./scripts/inspect-shell-source.sh environment
 ```
 
 ## Maintaining this repository

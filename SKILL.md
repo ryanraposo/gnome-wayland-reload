@@ -239,9 +239,43 @@ and reports `status=PREPARED`. `show` refuses altered payload bytes or a receipt
 that has already advanced. Never hand-write, shorten, reformat, or regenerate
 the payload after preparation.
 
-### Drive Looking Glass through `computer_use`
+### Automated injection via `scripts/looking-glass-inject.sh`
 
-Prefer `mode='som'` and advance one observed stage at a time:
+Preferred path when cua-driver is available on the host (default for agents):
+
+```bash
+scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+```
+
+This single command chains: `prepare → show → drive Looking Glass GUI → executed → verify`.
+It drives Alt+F2 → type "lg" → Enter → click Extensions → find Evaluator → paste
+the full one-line payload → press Enter → poll journal for the proof marker.
+Runs in ~5–8 seconds when successful.
+
+Options:
+- `--no-wait` — skip journal polling, report verification status immediately.
+- `--token TOKEN` — supply a deterministic token (for testing / audit trails).
+
+Exit codes:
+- `0` — injected and verified ok=true.
+- `1` — injection succeeded but proof/verification failed.
+- `2` — usage, dependency, or integrity error.
+- `3` — verification inconclusive; re-check may resolve.
+
+The script writes progress to stderr and the full receipt JSON (pretty-printed)
+to stdout on success (`0`). On failure it emits diagnostics on stderr and exits
+non-zero so consumers can decide whether to escalate.
+
+If the injected python driver (`lg-autohotswap.py`) cannot connect to cua-driver
+or cannot find the Evaluator UI element, the shell script falls back to
+**manual computer_use guidance** (below) — it records the payload to a temp file
+and prints its location so the agent can complete the sequence manually.
+
+### Manual injection through `computer_use` (fallback)
+
+Use this path when cua-driver is unavailable, the UI is obscured, or you prefer
+step-by-step visual control. Prefer `mode='som'` and advance one observed stage
+at a time:
 
 1. Send `key="alt+F2"`; capture and confirm the GNOME run dialog is open.
 2. Type `lg`, send `key="return"`, then capture and confirm Looking Glass opened.

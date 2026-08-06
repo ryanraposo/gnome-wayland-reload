@@ -224,7 +224,9 @@ restore any unmanaged directories backed up by the latest installation.
 | `scripts/recycle-extension.sh` | Verified lifecycle recycle for one UUID |
 | `scripts/dev-shell.sh` | GNOME 49+ nested development Shell launcher |
 | `scripts/diagnose.sh` | Session and prerequisite report |
-| `scripts/looking-glass-hotswap.sh` | Print a guarded top-level host hot-swap snippet |
+| `scripts/looking-glass-hotswap.sh` | Generate / retrieve guarded top-level hot-swap payloads |
+| `scripts/looking-glass-inject.sh` | Automate Looking Glass injection end-to-end (prepare→inject→verify) |
+| `scripts/lg-autohotswap.py` | cua-driver TCP client that drives Looking Glass GUI |
 | `scripts/inspect-shell-source.sh` | Extract JavaScript from the installed GNOME Shell build |
 | `scripts/check-update.sh` | Cached, non-mutating release update check |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
