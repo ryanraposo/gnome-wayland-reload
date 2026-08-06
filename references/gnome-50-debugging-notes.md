@@ -75,20 +75,31 @@ one-line evaluator text.
 
 Use `computer_use` to open Looking Glass, locate the current evaluator entry,
 type the complete `$PAYLOAD`, capture the entry, and verify its beginning,
-receipt token, and final `JSON.stringify(result)` before pressing Return. Execute
+receipt token, and final `JSON.stringify(proof)` before pressing Return. Execute
 once. A visually truncated, `undefined`, or ambiguous evaluator result is not a
 reason to execute again.
 
-After execution, verify through the receipt:
+Immediately after pressing Return, record the one-shot submission:
+
+```bash
+scripts/looking-glass-hotswap.sh executed "$RECEIPT"
+```
+
+This validates the prepared payload one last time, closes the abort window, and
+advances the receipt from `PREPARED` to `EXECUTED`. Record execution even when
+the visible evaluator result is unclear.
+
+Then verify through the same receipt:
 
 ```bash
 scripts/looking-glass-hotswap.sh verify "$RECEIPT"
 ```
 
-The verifier searches only journal entries after the recorded preparation time
-and requires the exact token marker. It parses the structured transaction proof,
-checks UUID and token equality, requires the replacement state object and
-restored extension-order bookkeeping, and separately requires
+The verifier accepts only `EXECUTED` or previously `INCONCLUSIVE` receipts. It
+searches current-boot journal entries after the recorded preparation time and
+requires the exact token marker. It parses the structured transaction proof,
+checks UUID and token equality, requires `phase=complete`, the replacement
+state object, restored extension-order bookkeeping, and separately requires
 `gnome-extensions info` to report `ACTIVE`.
 
 The result is persisted as one of:
@@ -97,14 +108,18 @@ The result is persisted as one of:
   verification;
 - `FAILED` — the exact invocation ran and reported failure; inspect its phase
   and rollback object without executing another payload; or
-- `INCONCLUSIVE` — the exact marker was not found; preserve the evidence and
-  inspect the journal instead of creating another module instance.
+- `INCONCLUSIVE` — exact proof is absent or malformed. Inspect the diagnostic
+  and journal, then rerun `verify` against the same receipt. Never rerun the
+  payload.
 
 If the prepared payload was never executed, close the receipt with:
 
 ```bash
 scripts/looking-glass-hotswap.sh abort "$RECEIPT"
 ```
+
+`abort` is valid only while the receipt is `PREPARED`. After Return has been
+pressed, use `executed` and preserve the receipt regardless of visible output.
 
 ### Transaction boundaries
 
@@ -121,12 +136,15 @@ syntax, import, or constructor error leaves the current state object untouched.
 After mutation begins, the payload records the exact phase.
 
 If replacement enablement fails after a clean transition to `INACTIVE`, it
-attempts replacement cleanup, restores the old state object, re-enables it, and
-proves old-object identity, `ACTIVE` state, and restored extension-order
-bookkeeping. If the current instance itself fails while disabling, the payload
-does not force an unsafe enable over an uncertain partial cleanup. It restores
-order bookkeeping, reports rollback failure, and explicitly requires manual
-recovery.
+attempts and proves replacement cleanup, restores the old state object,
+re-enables it, and proves old-object identity, `ACTIVE` state, and restored
+extension-order bookkeeping. Replacement cleanup failure prevents rollback
+from being called complete. Failure to restore manager order also fails the
+transaction and enters rollback.
+
+If the current instance itself fails while disabling, the payload does not
+force an unsafe enable over an uncertain partial cleanup. It restores order
+bookkeeping, reports rollback failure, and explicitly requires manual recovery.
 
 GNOME's internal disable/enable sequence normally moves the target UUID to the
 end of `_extensionOrder`. The payload records that intermediate order and then
@@ -140,9 +158,9 @@ For human inspection without a receipt, generate one line directly:
 scripts/looking-glass-hotswap.sh --one-line UUID
 ```
 
-The receipt-backed `prepare → show → verify` workflow is canonical for agents.
-The generated helper is the source of truth for the current private transaction;
-do not copy an old embedded JavaScript snippet from documentation.
+The receipt-backed `prepare → show → executed → verify` workflow is canonical
+for agents. The generated helper is the source of truth for the current private
+transaction; do not copy an old embedded JavaScript snippet from documentation.
 
 The proof only establishes replacement of the top-level state object. If
 `extension.js` statically imports an edited relative module, the unchanged
