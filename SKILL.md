@@ -315,8 +315,7 @@ part of the remaining behavioral proof.
 
 Before completion, verify a runtime marker or behavior unique to the new code.
 The receipt proves the exact top-level state-object transaction; it does not
-prove that a statically imported relative module changed. A successful proof
-does not mean that imported code changed. For imported modules, metadata,
+prove that a statically imported relative module changed. A successful proof does not mean that imported code changed. For imported modules, metadata,
 schemas, native code, process globals, repeated iteration, or any ambiguous
 result, move to a fresh nested Shell. Never repeat the top-level payload and
 claim that cached imported code changed.
