@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 SCRIPT="${1:-$(cd "$(dirname "$0")/.." && pwd)/scripts/host-login-proof.sh}"
+run_script() { bash "$SCRIPT" "$@"; }
 HOME_DIR="$ROOT/home"
 SOURCE="$ROOT/source"
 INSTALLED="$HOME_DIR/.local/share/gnome-shell/extensions/test@example.com"
@@ -58,7 +59,7 @@ export MOCK_STATE
 export GNOME_WAYLAND_RELOAD_LOGIN_PROOF_HOME="$STATE"
 export GNOME_WAYLAND_RELOAD_SHELL_IDENTITY_OVERRIDE="shell-before"
 
-prepare_out="$($SCRIPT prepare "$SOURCE")"
+prepare_out="$(run_script prepare "$SOURCE")"
 receipt="$(cat "$STATE/latest")"
 marker="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["marker"])' "$receipt")"
 
@@ -69,12 +70,12 @@ test -f "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["back
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$receipt")" = PREPARED_LOGOUT
 
 before_rc=0
-$SCRIPT verify "$receipt" >/dev/null 2>&1 || before_rc=$?
+run_script verify "$receipt" >/dev/null 2>&1 || before_rc=$?
 test "$before_rc" -eq 2
 
 export GNOME_WAYLAND_RELOAD_SHELL_IDENTITY_OVERRIDE="shell-after"
 export MOCK_JOURNAL="noise\n$marker\n"
-$SCRIPT verify "$receipt" > "$ROOT/verify.out"
+run_script verify "$receipt" > "$ROOT/verify.out"
 grep -q '^VERIFIED:' "$ROOT/verify.out"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$receipt")" = VERIFIED
 cmp -s "$SOURCE/extension.js" "$INSTALLED/extension.js"
@@ -82,10 +83,10 @@ cmp -s "$SOURCE/extension.js" "$INSTALLED/extension.js"
 # A second preparation snapshots the current install, then restore returns it.
 printf 'current-before-second-test\n' > "$INSTALLED/current.txt"
 export GNOME_WAYLAND_RELOAD_SHELL_IDENTITY_OVERRIDE="shell-third"
-$SCRIPT prepare "$SOURCE" >/dev/null
+run_script prepare "$SOURCE" >/dev/null
 receipt2="$(cat "$STATE/latest")"
 rm -f "$INSTALLED/current.txt"
-$SCRIPT restore "$receipt2" >/dev/null
+run_script restore "$receipt2" >/dev/null
 test -f "$INSTALLED/current.txt"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$receipt2")" = RESTORED
 
@@ -93,13 +94,13 @@ test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"
 rm -rf "$INSTALLED"
 ln -s "$SOURCE" "$INSTALLED"
 export GNOME_WAYLAND_RELOAD_SHELL_IDENTITY_OVERRIDE="shell-four"
-$SCRIPT prepare "$SOURCE" >/dev/null
+run_script prepare "$SOURCE" >/dev/null
 receipt3="$(cat "$STATE/latest")"
 marker3="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["marker"])' "$receipt3")"
 test ! -L "$INSTALLED"
 export GNOME_WAYLAND_RELOAD_SHELL_IDENTITY_OVERRIDE="shell-five"
 export MOCK_JOURNAL="$marker3"
-$SCRIPT verify "$receipt3" >/dev/null
+run_script verify "$receipt3" >/dev/null
 test -L "$INSTALLED"
 test "$(readlink "$INSTALLED")" = "$SOURCE"
 
