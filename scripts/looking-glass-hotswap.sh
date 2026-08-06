@@ -7,8 +7,9 @@ usage() {
     cat <<'USAGE'
 Usage:
   looking-glass-hotswap.sh [--one-line] [--token TOKEN] UUID
-  looking-glass-hotswap.sh prepare UUID
+  looking-glass-hotswap.sh prepare [--token TOKEN] UUID
   looking-glass-hotswap.sh show RECEIPT.json
+  looking-glass-hotswap.sh executed RECEIPT.json
   looking-glass-hotswap.sh verify RECEIPT.json
   looking-glass-hotswap.sh abort RECEIPT.json
 
@@ -17,11 +18,18 @@ This private diagnostic is only for a top-level extension.js change with
 reliable lifecycle cleanup. Prefer scripts/dev-shell.sh for normal development.
 
   --one-line    Print one evaluator-safe line instead of readable JavaScript.
-  --token       Supply a verification token (used by prepare and tests).
+  --token       Supply a verification token (primarily for deterministic tests).
   prepare       Create a payload plus durable machine-readable receipt.
   show          Verify payload integrity, then print the exact one-line payload.
+  executed      Record that the prepared payload was submitted exactly once.
   verify        Prove the exact token in the Shell journal and ACTIVE state.
   abort         Mark an unexecuted prepared receipt as aborted.
+
+Exit status:
+  0  command completed or receipt VERIFIED
+  1  exact execution proof was found but transaction verification FAILED
+  2  usage, receipt, dependency, or integrity error
+  3  verification remains INCONCLUSIVE; re-checking the same receipt is safe
 USAGE
 }
 
@@ -93,6 +101,9 @@ const stateName = state => {
         return String(state);
     return Object.keys(ExtensionState).find(name => ExtensionState[name] === state) ?? String(state);
 };
+const appendRollbackError = message => {
+    rollback.error = rollback.error ? \`\${rollback.error}; \${message}\` : message;
+};
 const restoreOrderBookkeeping = () => {
     const currentIndex = manager._extensionOrder.indexOf(uuid);
     if (currentIndex >= 0)
@@ -151,14 +162,19 @@ try {
     if (extension.state !== ExtensionState.ACTIVE || extension.stateObj !== nextState)
         throw new Error(\`Replacement did not reach ACTIVE: \${stateName(extension.state)}\`);
 
+    phase = 'restore-order';
     const orderImmediatelyAfterEnable = [...manager._extensionOrder];
     const orderBookkeepingRestored = restoreOrderBookkeeping();
+    if (!orderBookkeepingRestored)
+        throw new Error('Extension-order bookkeeping could not be restored');
+
+    phase = 'complete';
     const orderAfter = [...manager._extensionOrder];
     proof = {
         ok: true,
         uuid,
         token: reloadToken,
-        phase: 'complete',
+        phase,
         state: extension.state,
         stateName: stateName(extension.state),
         stateObjectReplaced: extension.stateObj === nextState,
@@ -178,16 +194,22 @@ try {
             if (extension.stateObj === nextState && nextState) {
                 rollback.replacementCleanupAttempted = true;
                 try {
-                    if (extension.state === ExtensionState.ACTIVE)
+                    if (extension.state === ExtensionState.ACTIVE) {
                         await manager._callExtensionDisable(uuid);
-                    else
+                        if (extension.state !== ExtensionState.INACTIVE)
+                            throw new Error(
+                                \`replacement disable did not reach INACTIVE: \${stateName(extension.state)}\`
+                            );
+                    } else {
                         await nextState.disable();
+                    }
                     rollback.replacementCleanupOk = true;
                 } catch (cleanupError) {
                     rollback.replacementCleanupOk = false;
-                    rollback.error = \`replacement cleanup: \${cleanupError.message}\`;
+                    appendRollbackError(\`replacement cleanup: \${cleanupError.message}\`);
                 }
             }
+
             extension.stateObj = previousState;
             if (extension.state !== ExtensionState.INACTIVE)
                 manager._changeExtensionState(extension, ExtensionState.INACTIVE);
@@ -196,12 +218,18 @@ try {
             rollback.activeStateRestored = extension.state === ExtensionState.ACTIVE;
             rollback.orderBookkeepingRestored =
                 rollback.activeStateRestored && restoreOrderBookkeeping();
-            rollback.ok = rollback.stateObjectRestored &&
+            const replacementCleanupProven =
+                !rollback.replacementCleanupAttempted ||
+                rollback.replacementCleanupOk === true;
+            rollback.ok = replacementCleanupProven &&
+                rollback.stateObjectRestored &&
                 rollback.activeStateRestored &&
                 rollback.orderBookkeepingRestored;
+            if (!rollback.ok && !rollback.error)
+                appendRollbackError('rollback proof is incomplete; manual recovery required');
         } catch (rollbackError) {
             rollback.ok = false;
-            rollback.error = rollback.error ?? rollbackError.message;
+            appendRollbackError(rollbackError.message);
         }
     } else if (mutationStarted && extension && previousState) {
         rollback.attempted = true;
@@ -209,7 +237,9 @@ try {
         rollback.activeStateRestored = extension.state === ExtensionState.ACTIVE;
         rollback.orderBookkeepingRestored = restoreOrderBookkeeping();
         rollback.ok = false;
-        rollback.error = 'current disable failed before a safe INACTIVE boundary; manual recovery required';
+        appendRollbackError(
+            'current disable failed before a safe INACTIVE boundary; manual recovery required'
+        );
     } else {
         rollback.ok = true;
     }
@@ -258,10 +288,9 @@ import sys
 path, field = sys.argv[1:]
 with open(path, encoding='utf-8') as handle:
     data = json.load(handle)
-value = data.get(field)
-if value is None:
+if field not in data or data[field] is None:
     raise SystemExit(f'missing receipt field: {field}')
-print(value)
+print(data[field])
 PY
 }
 
@@ -279,10 +308,11 @@ write_prepared_receipt() {
 import json
 import os
 import sys
+import tempfile
 
 receipt, uuid, token, prepared_at, prepared_epoch, payload, payload_sha256 = sys.argv[1:]
 data = {
-    'schema': 1,
+    'schema': 2,
     'status': 'PREPARED',
     'uuid': uuid,
     'token': token,
@@ -292,72 +322,28 @@ data = {
     'payload_file': payload,
     'payload_sha256': payload_sha256,
     'receipt_file': receipt,
+    'verification_attempts': 0,
     'next_stage': 'OPEN_LOOKING_GLASS',
 }
-with open(receipt, 'w', encoding='utf-8') as handle:
-    json.dump(data, handle, indent=2, sort_keys=True)
-    handle.write('\n')
-os.chmod(receipt, 0o600)
+
+directory = os.path.dirname(receipt)
+fd, temporary = tempfile.mkstemp(prefix='.receipt.', suffix='.tmp', dir=directory)
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write('\n')
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, receipt)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
 print(json.dumps(data, sort_keys=True))
 PY
 }
 
-update_receipt() {
-    local receipt="$1"
-    local status="$2"
-    local proof_json="$3"
-    local extension_active="$4"
-    local extension_info="$5"
-
-    python3 - "$receipt" "$status" "$proof_json" "$extension_active" \
-        "$extension_info" <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-receipt, status, proof_json, extension_active, extension_info = sys.argv[1:]
-with open(receipt, encoding='utf-8') as handle:
-    data = json.load(handle)
-data['status'] = status
-data['verified_at'] = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
-data['extension_active'] = extension_active == 'true'
-data['extension_info'] = extension_info
-if proof_json:
-    data['journal_proof'] = json.loads(proof_json)
-data['next_stage'] = 'BEHAVIOR_VERIFICATION' if status == 'VERIFIED' else 'RECOVER_OR_ESCALATE'
-with open(receipt, 'w', encoding='utf-8') as handle:
-    json.dump(data, handle, indent=2, sort_keys=True)
-    handle.write('\n')
-os.chmod(receipt, 0o600)
-print(json.dumps(data, sort_keys=True))
-PY
-}
-
-prepare() {
-    local uuid="$1"
-    local token prepared_at prepared_epoch session_dir payload receipt payload_sha256
-
-    validate_uuid "$uuid"
-    require_command python3
-    require_command sha256sum
-    token="$(new_token)"
-    validate_token "$token"
-    prepared_at="$(date --iso-8601=seconds)"
-    prepared_epoch="$(date +%s)"
-    session_dir="$STATE_ROOT/$token"
-    payload="$session_dir/payload.js"
-    receipt="$session_dir/receipt.json"
-
-    umask 077
-    mkdir -p "$session_dir"
-    emit_snippet "$uuid" "$token" true > "$payload"
-    payload_sha256="$(sha256sum "$payload" | awk '{print $1}')"
-    write_prepared_receipt "$receipt" "$uuid" "$token" "$prepared_at" \
-        "$prepared_epoch" "$payload" "$payload_sha256"
-}
-
-show_payload() {
+verify_payload_integrity() {
     local receipt="$1"
     local status payload expected actual
 
@@ -372,7 +358,126 @@ show_payload() {
     actual="$(sha256sum "$payload" | awk '{print $1}')"
     [ "$actual" = "$expected" ] || fail "payload hash does not match receipt"
     [ "$(wc -l < "$payload")" -eq 1 ] || fail "agent payload is not exactly one line"
+    printf '%s\n' "$payload"
+}
+
+update_receipt() {
+    local receipt="$1"
+    local operation="$2"
+    local status="${3:-}"
+    local proof_json="${4:-}"
+    local extension_active="${5:-false}"
+    local extension_info="${6:-}"
+    local diagnostic="${7:-}"
+
+    if ! python3 - "$receipt" "$operation" "$status" "$proof_json" \
+        "$extension_active" "$extension_info" "$diagnostic" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+receipt, operation, status, proof_json, extension_active, extension_info, diagnostic = sys.argv[1:]
+with open(receipt, encoding='utf-8') as handle:
+    data = json.load(handle)
+
+now = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
+if operation == 'executed':
+    if data.get('status') != 'PREPARED':
+        raise SystemExit(f"receipt is not PREPARED: {data.get('status')}")
+    data['status'] = 'EXECUTED'
+    data['executed_at'] = now
+    data['next_stage'] = 'TOKEN_VERIFICATION'
+elif operation == 'verify':
+    if data.get('status') not in {'EXECUTED', 'INCONCLUSIVE'}:
+        raise SystemExit(f"receipt is not EXECUTED or INCONCLUSIVE: {data.get('status')}")
+    data['status'] = status
+    data['last_checked_at'] = now
+    data['verification_attempts'] = int(data.get('verification_attempts', 0)) + 1
+    data['extension_active'] = extension_active == 'true'
+    data['extension_info'] = extension_info
+    data.pop('journal_proof', None)
+    data.pop('journal_diagnostic', None)
+    if proof_json:
+        data['journal_proof'] = json.loads(proof_json)
+    if diagnostic:
+        data['journal_diagnostic'] = diagnostic
+    if status == 'VERIFIED':
+        data['verified_at'] = now
+        data['next_stage'] = 'BEHAVIOR_VERIFICATION'
+    elif status == 'FAILED':
+        data['next_stage'] = 'RECOVER_OR_ESCALATE'
+    else:
+        data['next_stage'] = 'RECHECK_OR_INSPECT'
+elif operation == 'abort':
+    if data.get('status') != 'PREPARED':
+        raise SystemExit(f"receipt is not PREPARED: {data.get('status')}")
+    data['status'] = 'ABORTED'
+    data['aborted_at'] = now
+    data['next_stage'] = None
+else:
+    raise SystemExit(f'unknown receipt operation: {operation}')
+
+directory = os.path.dirname(receipt)
+fd, temporary = tempfile.mkstemp(prefix='.receipt.', suffix='.tmp', dir=directory)
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write('\n')
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, receipt)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+print(json.dumps(data, sort_keys=True))
+PY
+    then
+        fail "could not update receipt: $receipt"
+    fi
+}
+
+prepare() {
+    local uuid="$1"
+    local requested_token="${2:-}"
+    local token prepared_at prepared_epoch session_dir payload receipt payload_sha256
+
+    validate_uuid "$uuid"
+    require_command python3
+    require_command sha256sum
+    token="$requested_token"
+    if [ -z "$token" ]; then
+        token="$(new_token)"
+    fi
+    validate_token "$token"
+    prepared_at="$(date --iso-8601=seconds)"
+    prepared_epoch="$(date +%s)"
+    session_dir="$STATE_ROOT/$token"
+    payload="$session_dir/payload.js"
+    receipt="$session_dir/receipt.json"
+
+    umask 077
+    mkdir -p "$STATE_ROOT"
+    mkdir "$session_dir" || fail "hot-swap receipt already exists for token: $token"
+    emit_snippet "$uuid" "$token" true > "$payload"
+    payload_sha256="$(sha256sum "$payload" | awk '{print $1}')"
+    write_prepared_receipt "$receipt" "$uuid" "$token" "$prepared_at" \
+        "$prepared_epoch" "$payload" "$payload_sha256"
+}
+
+show_payload() {
+    local receipt="$1"
+    local payload
+    payload="$(verify_payload_integrity "$receipt")"
     cat "$payload"
+}
+
+mark_executed() {
+    local receipt="$1"
+    verify_payload_integrity "$receipt" >/dev/null
+    update_receipt "$receipt" executed
 }
 
 extract_proof_json() {
@@ -380,25 +485,29 @@ extract_proof_json() {
     python3 -c '
 import sys
 marker = sys.argv[1]
-last = ""
+matches = []
 for line in sys.stdin:
     if marker in line:
-        last = line.split(marker, 1)[1].strip()
-if last:
-    print(last)
+        matches.append(line.split(marker, 1)[1].strip())
+if matches:
+    print(matches[-1])
 ' "$marker"
 }
 
 verify_receipt() {
     local receipt="$1"
-    local uuid token marker prepared_at status journal proof_json info extension_active final_status
+    local uuid token marker prepared_at status journal proof_json info
+    local extension_active validation final_status diagnostic validation_rc
 
     require_command python3
     require_command journalctl
     require_command gnome-extensions
     [ -f "$receipt" ] || fail "receipt not found: $receipt"
     status="$(receipt_field "$receipt" status)"
-    [ "$status" = PREPARED ] || fail "receipt is not PREPARED: $status"
+    case "$status" in
+        EXECUTED|INCONCLUSIVE) ;;
+        *) fail "receipt is not EXECUTED or INCONCLUSIVE: $status" ;;
+    esac
     uuid="$(receipt_field "$receipt" uuid)"
     token="$(receipt_field "$receipt" token)"
     marker="$(receipt_field "$receipt" marker)"
@@ -406,75 +515,110 @@ verify_receipt() {
     validate_uuid "$uuid"
     validate_token "$token"
 
-    journal="$(journalctl --since "$prepared_at" -o cat /usr/bin/gnome-shell 2>/dev/null || true)"
+    journal="$(journalctl --since "$prepared_at" -b -o cat --no-pager \
+        /usr/bin/gnome-shell 2>/dev/null || true)"
     proof_json="$(printf '%s\n' "$journal" | extract_proof_json "$marker")"
-    info="$(gnome-extensions info "$uuid" 2>&1 || true)"
+    info="$(LC_ALL=C gnome-extensions info "$uuid" 2>&1 || true)"
     extension_active=false
     if grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE([[:space:]]|$)' <<< "$info"; then
         extension_active=true
     fi
 
     if [ -z "$proof_json" ]; then
-        update_receipt "$receipt" INCONCLUSIVE '' "$extension_active" "$info"
+        update_receipt "$receipt" verify INCONCLUSIVE '' "$extension_active" \
+            "$info" "exact token marker was not found in the GNOME Shell journal"
         return 3
     fi
 
-    final_status="$(python3 - "$proof_json" "$uuid" "$token" "$extension_active" <<'PY'
+    if validation="$(python3 - "$proof_json" "$uuid" "$token" "$extension_active" <<'PY'
 import json
 import sys
 
-proof = json.loads(sys.argv[1])
-uuid, token, extension_active = sys.argv[2:]
+raw, uuid, token, extension_active = sys.argv[1:]
+try:
+    proof = json.loads(raw)
+except json.JSONDecodeError as error:
+    print(f'INCONCLUSIVE\tjournal proof is not valid JSON: {error}')
+    raise SystemExit(3)
+
 ok = (
     proof.get('ok') is True
     and proof.get('uuid') == uuid
     and proof.get('token') == token
+    and proof.get('phase') == 'complete'
     and proof.get('stateObjectReplaced') is True
     and proof.get('orderBookkeepingRestored') is True
     and extension_active == 'true'
 )
-print('VERIFIED' if ok else 'FAILED')
+print(('VERIFIED' if ok else 'FAILED') + '\t')
 PY
-)"
-    update_receipt "$receipt" "$final_status" "$proof_json" "$extension_active" "$info"
-    [ "$final_status" = VERIFIED ]
+)"; then
+        validation_rc=0
+    else
+        validation_rc=$?
+    fi
+    final_status="${validation%%$'\t'*}"
+    diagnostic="${validation#*$'\t'}"
+
+    case "$validation_rc" in
+        0)
+            update_receipt "$receipt" verify "$final_status" "$proof_json" \
+                "$extension_active" "$info" "$diagnostic"
+            [ "$final_status" = VERIFIED ]
+            ;;
+        3)
+            update_receipt "$receipt" verify INCONCLUSIVE '' "$extension_active" \
+                "$info" "$diagnostic"
+            return 3
+            ;;
+        *)
+            fail "could not validate journal proof"
+            ;;
+    esac
 }
 
 abort_receipt() {
     local receipt="$1"
     require_command python3
     [ -f "$receipt" ] || fail "receipt not found: $receipt"
-    python3 - "$receipt" <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-receipt = sys.argv[1]
-with open(receipt, encoding='utf-8') as handle:
-    data = json.load(handle)
-if data.get('status') != 'PREPARED':
-    raise SystemExit(f"receipt is not PREPARED: {data.get('status')}")
-data['status'] = 'ABORTED'
-data['aborted_at'] = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
-data['next_stage'] = None
-with open(receipt, 'w', encoding='utf-8') as handle:
-    json.dump(data, handle, indent=2, sort_keys=True)
-    handle.write('\n')
-os.chmod(receipt, 0o600)
-print(json.dumps(data, sort_keys=True))
-PY
+    update_receipt "$receipt" abort
 }
 
 case "${1:-}" in
     prepare)
-        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
-        prepare "$2"
+        shift
+        prepare_token=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --token)
+                    [ "$#" -ge 2 ] || fail "--token requires a value"
+                    prepare_token="$2"
+                    shift 2
+                    ;;
+                --help|-h)
+                    usage
+                    exit 0
+                    ;;
+                --*)
+                    fail "unknown prepare option: $1"
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        prepare "$1" "$prepare_token"
         exit
         ;;
     show)
         [ "$#" -eq 2 ] || { usage >&2; exit 2; }
         show_payload "$2"
+        exit
+        ;;
+    executed)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        mark_executed "$2"
         exit
         ;;
     verify)
