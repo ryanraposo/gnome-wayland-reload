@@ -220,28 +220,40 @@ shares the user's home directory and settings, and can still modify user data.
 
 When a host-only state is expensive to recreate and the change is confined to
 the top-level `extension.js`, generate the canonical guarded Looking Glass
-payload as one line:
+payload and drive Looking Glass via `computer_use`:
 
-```bash
-scripts/looking-glass-hotswap.sh --one-line UUID
-```
+1. Generate the payload:
+   ```bash
+   LOOKSGLASS_JQ="$(scripts/looking-glass-hotswap.sh "$UUID")"
+   ```
+2. Verify the stderr warning lines contain your `reload_token`.
+3. Use `computer_use` (preferably `mode='som'`) to drive these steps in sequence:
+   a. `key="alt+F2"` — opens the GNOME run-dialog overlay.
+   b. Type `lg` then `key="return"` — launches Looking Glass.
+   c. `capture(mode='som')` to locate the JavaScript evaluator input box
+      (usually labeled "JavaScript evaluation" or similar).
+   d. `click <evaluator_element_index>` then `type text="$LOOKSGLASS_JQ"`.
+   e. `key="return"` — execute the payload.
+   f. Capture again to confirm the evaluator shows the proof JSON or `undefined`
+      (LG evaluator suppresses long results; this is normal).
+   g. Verify the proof token appears in journal:
+      ```bash
+      journalctl --since '30 seconds ago' /usr/bin/gnome-shell | grep -i "$UUID"
+      ```
+4. If the journal confirms `ok=true` and the correct `reload_token`, the
+   hot-swap succeeded.
 
-Open Looking Glass with `Alt`+`F2`, enter `lg`, and paste or type that complete
-one-line payload into its JavaScript evaluator. Before pressing Enter, verify
-that the evaluator contains the payload's beginning and final
-`JSON.stringify(proof)`. The snippet disables the extension, dynamically
-imports `extension.js` with a unique query, constructs a new state object, and
-enables it. It retains the previous state object for a best-effort rollback and
-emits a unique proof token after the new object is active. The helper's normal
-mode remains multiline for human inspection.
+Before any hot-swap, deploy the updated source files into the extension directory
+(returned by `scripts/diagnose.sh` or `gnome-extensions info UUID`). Looking Glass
+imports from the installed location, not the git checkout.
 
 Do not use this for imported modules, metadata, schemas, native code, repeated
 development cycles, or an extension whose cleanup is not known to be
 idempotent. Immediately verify the emitted token, `ACTIVE` state,
 `stateObjectReplaced`, fresh logs, and behavior. Use a fresh nested Shell if
 anything is uncertain. Treat an evaluator result of `undefined` as inconclusive,
-not failure: check the helper's proof token and a runtime marker
-unique to the new version before attempting another hot-swap.
+not failure: check the helper's proof token and a runtime marker unique to the
+new version before attempting another hot-swap.
 
 The proof only establishes replacement of the top-level state object. If
 `extension.js` statically imports an edited relative module, the unchanged
