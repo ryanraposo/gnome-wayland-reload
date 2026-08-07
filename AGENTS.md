@@ -28,7 +28,22 @@ Read `SKILL.md`, choose the smallest refresh from its decision matrix, and
 preserve the distinction between lifecycle cycling and fresh-process reloads.
 Never kill or replace the active host `gnome-shell` on Wayland.
 
-From a checkout, helpers are available directly:
+For an already-installed, already-`ACTIVE` development extension whose live
+host state matters, prefer the complete deploy + Looking Glass path. Point it at
+the extension directory or at a repository containing exactly one extension:
+
+```bash
+./scripts/reload-extension.sh /path/to/extension-or-repo
+```
+
+That command treats an active installed extension as the normal case: it deploys
+the source tree into the installed extension directory, proves the top-level
+`extension.js` bytes match, then executes the receipt-backed Looking Glass
+hot-swap. It does not disable/enable the extension and does not log out. Relative
+imports remain subject to GJS module caching; use a fresh nested Shell when those
+changed.
+
+Other helpers are available directly from a checkout:
 
 ```bash
 ./scripts/diagnose.sh
@@ -51,8 +66,9 @@ When changing the skill itself:
    hot-swap, a disposable nested Shell, and a real host logout/login.
 4. Keep fragile GNOME commands in scripts and version-specific findings in
    `references/`; avoid duplicating either as improvised prose.
-5. Run `bash ./tests/skill-ux.sh` and `./tests/run.sh`, then inspect both isolated
-   installed runtime copies before claiming completion.
+5. Run `bash ./tests/skill-ux.sh`, `./tests/run.sh`, and the dedicated hot-swap
+   tests, then inspect both isolated installed runtime copies before claiming
+   completion.
 6. Publish, release, or change repository settings only with explicit user
    authorization.
 

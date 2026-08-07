@@ -9,10 +9,10 @@
 
 # gnome-wayland-reload
 
-Fresh extension code. Disposable nested Shells. No ceremonial logout.
+Fresh extension code. Live host reload. No ceremonial logout.
 
 [Install](#install) · [Decision matrix](#decision-matrix) ·
-[Development loop](#the-development-loop) · [Host hot-swap](#advanced-host-hot-swap) ·
+[Development loop](#the-development-loop) · [Host reload](#live-host-reload) ·
 [Uninstall](#uninstall)
 </div>
 
@@ -24,8 +24,10 @@ extension JavaScript cannot be unloaded from that process.
 
 This Agent Skill turns that hard boundary into a practical workflow:
 
+- deploy and hot-swap an already-`ACTIVE` extension's top-level `extension.js`
+  through Looking Glass without disable/enable or logout;
 - soft-cycle one extension when lifecycle cleanup is enough;
-- run a fresh nested `gnome-shell --devkit` for edited Shell-side code;
+- run a fresh nested `gnome-shell --devkit` when imported Shell modules changed;
 - reopen the separate preferences process for `prefs.js` changes;
 - compile schemas and restart only the processes that consume them;
 - inspect the right logs before escalating; and
@@ -47,10 +49,10 @@ Run as your normal desktop user—**not with `sudo`**:
 curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 ```
 
-The installer first prepares `mutter-dev-bin`, then places complete,
-independent, runtime-native copies in both skill homes. The development package
-enables fresh GNOME Shell test sessions in a window, so edited extension code
-can load without logging out or restarting your real desktop.
+The installer prepares `mutter-dev-bin`, then places complete, independent,
+runtime-native copies in both skill homes. The installed bundle includes the
+source-to-host reload wrapper, Looking Glass injector and driver, nested-Shell
+runner, diagnostics, and receipt machinery.
 
 The Agent Skills copy uses OpenAI's minimal skill metadata and UI file; the
 Hermes copy uses Hermes version, platform, tag, and related-skill metadata:
@@ -92,14 +94,42 @@ first used. The check is offline-safe and never updates files by itself. Run
 | Stuck UI, lifecycle cleanup, settings reaction | Disable → enable |
 | `stylesheet.css` | Disable → enable first |
 | `prefs.js` | Close → reopen preferences |
-| `extension.js` or imported Shell-side JavaScript | Fresh nested Shell |
-| Small top-level `extension.js` host diagnostic | Guarded Looking Glass hot-swap |
+| Already-`ACTIVE` extension; top-level `extension.js` | Deploy → Looking Glass live reload |
+| Imported Shell-side JavaScript | Fresh nested Shell |
 | `metadata.json` | Fresh nested Shell |
 | Schema XML | Compile schemas, then refresh its consumer |
-| Host-only behavior that cannot reproduce nested | Logout → login |
+| Host-only behavior requiring a fresh Shell process | Logout → login |
 
 Disable/enable is a lifecycle recycle. It does **not** load edited JavaScript
 into the existing Shell process.
+
+## Live host reload
+
+For the common development case—an extension is already installed and active,
+and the runtime change is in its top-level `extension.js`—point the helper at
+the extension source directory or at a repository containing exactly one GNOME
+extension:
+
+```bash
+~/.agents/skills/gnome-wayland-reload/scripts/reload-extension.sh \
+  /path/to/extension-or-repo
+```
+
+The command:
+
+1. discovers `metadata.json` and the UUID;
+2. confirms the installed target is already `ACTIVE`;
+3. copies the source tree into the installed extension directory;
+4. proves installed `extension.js` matches source; and
+5. opens Looking Glass, injects a cache-busted replacement transaction, and
+   verifies its receipt and journal proof.
+
+Being already installed and enabled is the happy path. The wrapper does not run
+`gnome-extensions disable`, does not run `gnome-extensions enable`, and does not
+log out. Every top-level iteration gets a fresh transaction receipt.
+
+Relative imports remain cached by the running GJS process. If one of those
+changed, use the nested-Shell path below.
 
 ## Soft-cycle one extension
 
@@ -114,33 +144,48 @@ intentional.
 
 ## The development loop
 
-The main installer prepares the development runner. Launch a fresh, disposable
-Shell in a window:
+For top-level `extension.js` work on an already-active extension:
+
+```bash
+# edit
+~/.agents/skills/gnome-wayland-reload/scripts/reload-extension.sh /path/to/repo
+# observe the new behavior; repeat
+```
+
+That is the canonical no-logout live loop: **deploy bytes first, hot-swap
+second**.
+
+When an imported module, `metadata.json`, schema consumer, native library, or
+Shell process global changed, launch a fresh disposable Shell instead:
 
 ```bash
 ~/.agents/skills/gnome-wayland-reload/scripts/dev-shell.sh
 ```
 
-Inside that nested desktop, open a terminal and enable the extension. After
-editing `extension.js`, an imported module, or `metadata.json`, close the nested
-Shell and start it again. Your host desktop and its open applications stay put.
+Inside that nested desktop, enable the extension. After another imported-module
+change, close the nested Shell and start it again. Your host desktop and its
+open applications stay put.
 
 The nested session shares your home directory and settings. It is a clean Shell
 process, not a security sandbox.
 
-## Advanced host hot-swap
+## Looking Glass transaction internals
 
-For a small top-level `extension.js` change that must be tested against host-only
-state, generate a guarded Looking Glass snippet:
+The source-to-host wrapper delegates to:
 
 ```bash
-~/.agents/skills/gnome-wayland-reload/scripts/looking-glass-hotswap.sh \
+~/.agents/skills/gnome-wayland-reload/scripts/looking-glass-inject.sh \
   your-extension@example.com
 ```
 
-This is an explicitly advanced diagnostic path. It uses private Shell APIs,
-does not refresh relative imports or metadata, and retains old modules. Prefer
-the nested development Shell for normal iteration.
+That helper owns `prepare → show → GUI injection → executed → verify` and uses
+`scripts/lg-autohotswap.py` when the CUA driver is available. The underlying
+receipt generator is `scripts/looking-glass-hotswap.sh`.
+
+The mechanism relies on private Shell APIs, retains old imported module objects,
+and does not refresh relative imports, metadata, schemas, native code, or other
+process-global state. Those are real boundaries; an already-active extension is
+not one of them.
 
 ## Preferences, schemas, and logs
 
@@ -158,17 +203,13 @@ Run the bundled environment report when the loop is unavailable:
 ```
 
 Looking Glass remains useful for live inspection: press `Alt`+`F2`, enter `lg`,
-and open Extensions. It shows state and errors, but it cannot unload cached
-modules.
+and open Extensions. A normal disable/enable from Looking Glass still uses the
+cached module; the reload helper instead performs a cache-busted dynamic import
+and replaces the live extension state object.
 
-For one-off host diagnosis, GNOME 50 can cache-bust and dynamically import a
-simple top-level `extension.js` from Looking Glass, then replace the live
-extension instance. This relies on private Shell internals, retains old modules,
-and does not reload relative imports, metadata, or schemas. The supported loop
-remains a fresh nested Shell. See
-[`references/gnome-50-debugging-notes.md`](references/gnome-50-debugging-notes.md)
-for the guarded recipe, recovery limits, verification ladder, and runtime bugs
-that commonly look like stale code.
+See [`references/gnome-50-debugging-notes.md`](references/gnome-50-debugging-notes.md)
+for the guarded transaction, recovery limits, verification ladder, and runtime
+bugs that commonly look like stale code.
 
 The workflow contract for assumptions, phase transitions, mutation classes,
 failure budgets, and completion proof lives in
@@ -196,12 +237,16 @@ Source [`examples/shell-functions.sh`](examples/shell-functions.sh) to add
 ```bash
 bash ./tests/skill-ux.sh
 ./tests/run.sh
+bash ./tests/hotswap-agent.sh
+node ./tests/hotswap-payload.mjs
+bash ./tests/reload-extension.sh
 ```
 
-The constitutional gate enforces the 48-character description, rich trigger
-coverage outside frontmatter, repository/runtime authority, installed decision
-reference, and version identity. The regression suite verifies installers,
-restoration, runtime-native payloads, helpers, and GNOME-specific safety rules.
+The constitutional gate enforces the compact description, rich trigger coverage
+outside frontmatter, repository/runtime authority, installed decision reference,
+and version identity. The regression suites verify installers, restoration,
+runtime-native payloads, Looking Glass transaction integrity, and the complete
+already-`ACTIVE` deploy-and-reload path.
 
 ## Uninstall
 
@@ -221,12 +266,13 @@ restore any unmanaged directories backed up by the latest installation.
 | `SKILL.md` | Canonical cross-agent workflow |
 | `install.sh` | Local and curl-pipe dual-runtime installer |
 | `uninstall.sh` | Marker-safe removal and optional restoration |
+| `scripts/reload-extension.sh` | Deploy source and reload an already-`ACTIVE` host extension |
 | `scripts/recycle-extension.sh` | Verified lifecycle recycle for one UUID |
 | `scripts/dev-shell.sh` | GNOME 49+ nested development Shell launcher |
 | `scripts/diagnose.sh` | Session and prerequisite report |
-| `scripts/looking-glass-hotswap.sh` | Generate / retrieve guarded top-level hot-swap payloads |
-| `scripts/looking-glass-inject.sh` | Automate Looking Glass injection end-to-end (prepare→inject→verify) |
-| `scripts/lg-autohotswap.py` | cua-driver TCP client that drives Looking Glass GUI |
+| `scripts/looking-glass-hotswap.sh` | Receipt-backed top-level hot-swap transaction generator |
+| `scripts/looking-glass-inject.sh` | Automate Looking Glass injection end-to-end |
+| `scripts/lg-autohotswap.py` | CUA-driver client that drives Looking Glass GUI |
 | `scripts/inspect-shell-source.sh` | Extract JavaScript from the installed GNOME Shell build |
 | `scripts/check-update.sh` | Cached, non-mutating release update check |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
@@ -235,6 +281,7 @@ restore any unmanaged directories backed up by the latest installation.
 | `assets/mascot.txt` | Reloop, the nested-Shell mechanic and his reload staff |
 | `tests/skill-ux.sh` | Constitutional and metadata regression checks |
 | `tests/run.sh` | Installer and helper regression tests |
+| `tests/reload-extension.sh` | Already-`ACTIVE` source deployment and handoff proof |
 | `agents/openai.yaml` | Skill-list UI metadata |
 
 ## Authoritative references

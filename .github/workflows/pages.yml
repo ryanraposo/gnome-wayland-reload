@@ -26,6 +26,8 @@ jobs:
         run: |
           bash ./tests/hotswap-agent.sh
           node ./tests/hotswap-payload.mjs
+      - name: Deploy and live reload wrapper
+        run: bash ./tests/reload-extension.sh
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
