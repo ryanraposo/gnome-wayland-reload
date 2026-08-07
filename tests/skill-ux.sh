@@ -6,10 +6,23 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
-description=$(sed -n 's/^description:[[:space:]]*//p' "$ROOT/SKILL.md" | head -n1)
-[ -n "$description" ] || fail "skill has a description"
-[ "${#description}" -lt 60 ] || fail "skill description is below 60 characters"
-pass "skill description is ${#description} characters"
+check_description() {
+    local file="$1"
+    local label="$2"
+    local description
+
+    description=$(sed -n 's/^description:[[:space:]]*//p' "$file" | head -n1)
+    [ -n "$description" ] || fail "$label has a description"
+    case "$description" in
+        '>'|'|''>'-'|'|-') fail "$label description must be an inline scalar" ;;
+    esac
+    [ "${#description}" -lt 60 ] || \
+        fail "$label description is below 60 characters"
+    pass "$label description is ${#description} characters"
+}
+
+check_description "$ROOT/SKILL.md" "portable skill"
+check_description "$ROOT/runtimes/hermes-frontmatter.yaml" "Hermes skill"
 
 grep -q '^## Workflow Contract$' "$ROOT/SKILL.md" || \
     fail "skill owns the workflow"
@@ -26,7 +39,7 @@ for phrase in \
     grep -q -- "$phrase" "$ROOT/SKILL.md" || \
         fail "trigger coverage contains: $phrase"
 done
-pass "compact frontmatter preserves rich trigger coverage"
+pass "skill body preserves rich trigger coverage"
 
 grep -q '^## Maintaining this repository$' "$ROOT/AGENTS.md" || \
     fail "repository guide owns maintenance"
