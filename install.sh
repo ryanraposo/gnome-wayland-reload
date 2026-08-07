@@ -128,7 +128,10 @@ FILES=(
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
     scripts/diagnose.sh
+    scripts/reload-extension.sh
     scripts/looking-glass-hotswap.sh
+    scripts/looking-glass-inject.sh
+    scripts/lg-autohotswap.py
     scripts/inspect-shell-source.sh
     scripts/check-update.sh
 )
@@ -166,7 +169,7 @@ grep -q '^name: gnome-wayland-reload$' "$stage/SKILL.md" || {
     echo "error: downloaded skill failed identity validation" >&2
     exit 1
 }
-chmod +x "$stage/scripts/"*.sh
+chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py
 
 mkdir -p "$STATE_HOME/backups"
 stamp="$(date +%Y%m%d-%H%M%S)-$$"
@@ -267,6 +270,7 @@ case "$MODE" in
         ;;
 esac
 printf '  \033[33mLaunch:\033[0m       %s\n' "$launch_path"
+printf '  \033[33mHost reload:\033[0m  %s\n' "$(dirname "$launch_path")/reload-extension.sh SOURCE_OR_REPO"
 printf '  \033[33mDiagnose:\033[0m     %s\n' "$(dirname "$launch_path")/diagnose.sh"
 case "$MODE" in
     agents)

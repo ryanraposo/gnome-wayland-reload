@@ -22,9 +22,15 @@ jobs:
         run: bash ./tests/skill-ux.sh
       - name: Regression suite
         run: ./tests/run.sh
+      - name: Agent hot-swap transaction
+        run: |
+          bash ./tests/hotswap-agent.sh
+          node ./tests/hotswap-payload.mjs
+      - name: Deploy and live reload wrapper
+        run: bash ./tests/reload-extension.sh
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
