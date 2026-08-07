@@ -14,7 +14,7 @@ check_description() {
     description=$(sed -n 's/^description:[[:space:]]*//p' "$file" | head -n1)
     [ -n "$description" ] || fail "$label has a description"
     case "$description" in
-        '>'|'|''>'-'|'|-') fail "$label description must be an inline scalar" ;;
+        '>'|'|'|'>-'|'|-') fail "$label description must be an inline scalar" ;;
     esac
     [ "${#description}" -lt 60 ] || \
         fail "$label description is below 60 characters"
