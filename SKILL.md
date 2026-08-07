@@ -1,19 +1,6 @@
 ---
 name: gnome-wayland-reload
-description: >-
-  Diagnose, develop, reload, and recover GNOME Shell extensions on GNOME
-  49–50 Wayland without killing the compositor. Use whenever a user asks to
-  reload, restart, or refresh an extension; says edited extension.js, imported
-  JavaScript, metadata.json, stylesheet.css, prefs.js, or GSettings schemas are
-  not taking effect; reports that disable/enable did not load new code, an
-  extension is ACTIVE or ERROR but its UI is missing, duplicated, stuck, or
-  behaving strangely, or animations reset after polling; needs GNOME Shell
-  logs, Looking Glass, a cache-busted host hot-swap, lifecycle cleanup, schema
-  compilation, or a nested gnome-shell --devkit session; needs to prove that
-  installed bytes are actually running; or asks whether Alt+F2 r,
-  gnome-shell --replace, logout/login, or another Shell restart is safe or
-  necessary on Wayland. Do not use for ordinary GNOME app automation or
-  screenshots unrelated to Shell-extension reload, development, or recovery.
+description: Reload and debug GNOME Shell extensions on Wayland
 ---
 
 # Reload GNOME Extensions on Wayland
