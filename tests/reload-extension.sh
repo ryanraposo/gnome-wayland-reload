@@ -6,6 +6,12 @@ SCRIPT="$ROOT/scripts/reload-extension.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Packaging proof: the installed skill must contain the complete live-reload chain.
+grep -F 'scripts/reload-extension.sh' "$ROOT/install.sh" >/dev/null
+grep -F 'scripts/looking-glass-inject.sh' "$ROOT/install.sh" >/dev/null
+grep -F 'scripts/lg-autohotswap.py' "$ROOT/install.sh" >/dev/null
+grep -F 'chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py' "$ROOT/install.sh" >/dev/null
+
 REPO="$TMP/horner-like-repo"
 SOURCE="$REPO/manifestations/desktop/extension/test@example.com"
 INSTALLED="$TMP/installed/test@example.com"
