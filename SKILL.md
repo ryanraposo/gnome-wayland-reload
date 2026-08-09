@@ -218,3 +218,264 @@ scripts/reload-extension.sh [--no-wait] [--token TOKEN] /path/to/extension-or-re
 
 Use it when the target is already installed and `ACTIVE`, the runtime change is
 confined to top-level `extension.js`, and the extension's cleanup is reliable.
+It deploys first and then delegates to `scripts/looking-glass-inject.sh`.
+
+The lower-level transaction owns this strict state machine:
+
+```text
+PREPARED → OPEN_LOOKING_GLASS → EVALUATOR_LOCATED → PAYLOAD_INSERTED
+→ PAYLOAD_VERIFIED → EXECUTED → TOKEN_VERIFIED → BEHAVIOR_VERIFIED
+```
+
+Do not skip, reorder, or silently infer a completed stage.
+
+### Prepare a durable receipt
+
+After deploying the edited file and proving that source and installed bytes
+match, prepare the exact one-line payload:
+
+```bash
+PREPARED_JSON="$(scripts/looking-glass-hotswap.sh prepare "$UUID")"
+RECEIPT="$(python3 -c \
+  'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' \
+  "$PREPARED_JSON")"
+PAYLOAD="$(scripts/looking-glass-hotswap.sh show "$RECEIPT")"
+```
+
+`prepare` creates private `0600` payload and receipt files, records the UUID,
+unique token, exact marker, preparation timestamp, payload path, and SHA-256,
+and reports `status=PREPARED`. `show` refuses altered payload bytes or a receipt
+that has already advanced. Never hand-write, shorten, reformat, or regenerate
+the payload after preparation.
+
+### Automated injection via `scripts/looking-glass-inject.sh`
+
+Preferred lower-level path when cua-driver is available on the host:
+
+```bash
+scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+```
+
+This single command chains: `prepare → show → drive Looking Glass GUI → executed → verify`.
+It drives Alt+F2 → type "lg" → Enter → click Extensions → find Evaluator → paste
+the full one-line payload → press Enter → poll journal for the proof marker.
+
+Options:
+- `--no-wait` — skip journal polling, report verification status immediately.
+- `--token TOKEN` — supply a deterministic token for testing or audit trails.
+
+Exit codes:
+- `0` — injected and verified ok=true.
+- `1` — injection succeeded but proof/verification failed.
+- `2` — usage, dependency, or integrity error.
+- `3` — verification inconclusive; re-check may resolve.
+
+The script writes progress to stderr and the full receipt JSON (pretty-printed)
+to stdout on success (`0`). On failure it emits diagnostics on stderr and exits
+non-zero so consumers can decide whether to escalate.
+
+If the injected Python driver (`lg-autohotswap.py`) cannot connect to cua-driver
+or cannot find the Evaluator UI element, the shell script falls back to manual
+computer-use guidance below. It records the payload to a temporary file and
+prints its location so the agent can complete the sequence manually.
+
+### Manual injection through computer use
+
+Use this path when cua-driver is unavailable or the UI requires visual control.
+Advance one observed stage at a time:
+
+1. Send `Alt+F2`; capture and confirm the GNOME run dialog is open.
+2. Type `lg`, press Return, then capture and confirm Looking Glass opened.
+3. Capture the current evaluator entry. Do not guess a stale element index from
+   an earlier capture.
+4. Click the evaluator and type the exact one-line `$PAYLOAD`.
+5. Capture before execution. Confirm the entry begins with the expected
+   `const uuid = '…';`, contains the receipt token, and ends with
+   `JSON.stringify(proof)`. Any truncation or mismatch means abort this attempt
+   without pressing Return.
+6. Press Return exactly once. Never retry the payload merely because the visible
+   evaluator result is truncated, `undefined`, or unclear.
+7. Immediately record the one-shot submission:
+   ```bash
+   scripts/looking-glass-hotswap.sh executed "$RECEIPT"
+   ```
+   This closes the abort window and advances the receipt to `EXECUTED`.
+
+Treat an evaluator result of `undefined` as inconclusive; it is never proof and
+never permission to execute the payload again.
+
+If execution has not happened, close the workflow cleanly with:
+
+```bash
+scripts/looking-glass-hotswap.sh abort "$RECEIPT"
+```
+
+`abort` is valid only while the receipt is `PREPARED`. Once Return has been
+pressed, record `executed` even if the evaluator output is unclear.
+
+### Verify from the durable receipt
+
+After recording the single execution, run:
+
+```bash
+scripts/looking-glass-hotswap.sh verify "$RECEIPT"
+```
+
+The verifier accepts only `EXECUTED` or previously `INCONCLUSIVE` receipts. It
+searches current-boot Shell journal entries from the recorded preparation time,
+requires the receipt's exact token marker, parses its structured proof, checks
+UUID and token equality, requires `phase=complete`,
+`stateObjectReplaced=true`, extension-order bookkeeping restoration, and an
+independent `gnome-extensions info` state of `ACTIVE`.
+
+Interpret its exit status and persisted receipt literally:
+
+- `0 / VERIFIED` — transaction proof is complete; continue to observable
+  behavior verification.
+- `1 / FAILED` — the exact invocation ran but replacement or proof failed. Read
+  `journal_proof.phase` and `journal_proof.rollback`; do not execute again.
+- `2` — usage, receipt, dependency, or integrity error. If Return was already
+  pressed, preserve the receipt and do not execute again.
+- `3 / INCONCLUSIVE` — exact proof is absent or malformed. Inspect the receipt
+  and journal, then safely rerun `verify` against the same receipt. Never rerun
+  the payload.
+
+The generated transaction refuses a target that is not already `ACTIVE`, lacks
+a live state object, is absent from extension order, or does not expose the
+expected private manager methods. Import and construction occur before host
+mutation. A replacement-enable failure attempts and proves restoration of the
+previous state object, `ACTIVE` state, replacement cleanup, and extension-order
+bookkeeping. Failure to restore bookkeeping fails closed and enters rollback.
+If the current instance fails while disabling, the receipt explicitly requires
+manual recovery; it never calls that an automatic rollback success.
+
+GNOME's internal disable path may temporarily cycle extensions ordered after
+the target. The payload restores manager order bookkeeping, but it cannot erase
+arbitrary side effects produced by another extension's lifecycle methods. Treat
+those as part of the remaining behavioral proof.
+
+Before completion, verify a runtime marker or behavior unique to the new code.
+The receipt proves the exact top-level state-object transaction; it does not
+prove that a statically imported relative module changed. A successful proof
+does not mean that imported code changed. For imported modules, metadata,
+schemas, native code, or process globals, move to a fresh nested Shell. Repeated
+top-level `extension.js` iterations may use this live path with a fresh receipt
+each time when cleanup remains reliable.
+
+For direct human inspection, the generator still supports:
+
+```bash
+scripts/looking-glass-hotswap.sh --one-line UUID
+```
+
+The deploy + receipt-backed injection path is canonical for live host top-level
+reloads; `prepare → show → executed → verify` remains the canonical lower-level
+transaction for agents.
+
+## Reload Preferences and Schemas
+
+Preferences run in a separate `gjs` process. Close the preferences window and
+reopen it to load `prefs.js` changes:
+
+```bash
+gnome-extensions prefs UUID
+```
+
+Follow preference logs with:
+
+```bash
+journalctl -f -o cat /usr/bin/gjs
+```
+
+When editing a schema without reinstalling through `gnome-extensions`, compile
+it from the extension root:
+
+```bash
+glib-compile-schemas schemas/
+```
+
+Then reopen preferences and restart the nested Shell if the Shell process also
+consumes the schema.
+
+## Observe Before Escalating
+
+Follow host Shell logs:
+
+```bash
+journalctl -f -o cat /usr/bin/gnome-shell
+```
+
+Filter for the UUID while preserving streaming output:
+
+```bash
+journalctl -f -o cat /usr/bin/gnome-shell |
+  grep --line-buffered -i -- 'UUID'
+```
+
+Open Looking Glass with `Alt`+`F2`, then `lg`. Use its Extensions page to
+inspect loaded state, errors, source location, and metadata. Looking Glass does
+not defeat module caching by itself. A normal disable/enable from Looking Glass
+still uses the cached module.
+
+Do not treat matching source and installed-file hashes as proof that those
+bytes are running. Verify three layers: the installed artifact, the extension's
+`ACTIVE` state and fresh journal entries, and an observable behavior or unique
+diagnostic marker from the new code. For animation bugs, combine a structural
+check (timer, transition, frame counter, or new-version field) with at least
+three target-cropped captures at non-harmonic offsets. Captures one loop period
+apart can look identical even when animation is working.
+
+## Separate Reload Failures from Runtime Bugs
+
+Before escalating to a fresh process, check whether the new module is active
+but behaving incorrectly. GNOME 50 pitfalls observed in practice include:
+
+- `actor.ease()` consumes `repeatCount` and `autoReverse`; snake_case belongs
+  to lower-level `Clutter.PropertyTransition` construction and is silently
+  wrong in the `ease()` options object.
+- A status poll that reapplies the same state can restart an otherwise-correct
+  animation. Animate only when the semantic state changes.
+- A square `St.Icon.icon_size` can stretch non-square raster artwork. Load the
+  texture with one unconstrained dimension and center it in a fixed container.
+- Partial `enable()` failure can strand actors. Initialize owned fields first,
+  make `disable()` idempotent, and call it from an `enable()` failure path.
+- APIs and option bags are versioned. GNOME 50 uses gesture APIs such as
+  `Clutter.PanGesture` and `Clutter.ClickGesture`; inspect the installed Shell
+  sources and logs instead of assuming an older example still applies.
+
+The reference note contains concrete snippets and local-source inspection
+commands for these cases.
+
+Use the bundled inspector to read the exact JavaScript shipped by the current
+GNOME Shell build:
+
+```bash
+scripts/inspect-shell-source.sh environment
+scripts/inspect-shell-source.sh extension-system
+```
+
+## Reject Unsafe Host-Restart Advice
+
+Do not run these against the active Wayland session:
+
+```bash
+killall gnome-shell
+gnome-shell --replace
+systemctl --user restart gnome-shell
+kill -HUP "$(pidof gnome-shell)"
+```
+
+Do not recommend `Alt`+`F2` → `r` or `restart` on Wayland. These are X11-era
+restart paths and do not provide an in-session GNOME 50 Wayland reload.
+
+If a fresh host process is truly required and a nested Shell cannot reproduce
+the issue, explain that logout/login is the remaining correct boundary. Never
+log the user out without explicit permission.
+
+## Completion Receipt
+
+Finish only when the changed artifact and selected refresh boundary match, the
+host compositor remains intact, and the new behavior is proved through installed
+bytes, fresh runtime evidence, and an observable result. Report the action,
+evidence, any rollback or recovery, remaining uncertainty, and one meaningful
+next action.
