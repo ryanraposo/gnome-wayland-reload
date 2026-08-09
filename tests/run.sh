@@ -39,8 +39,8 @@ assert "skill metadata permits implicit invocation" \
 assert "OpenAI skill frontmatter stays minimal" sh -c \
     'sed -n "2,/^---$/p" "$1" | grep -Eq "^(name|description):" && ! sed -n "2,/^---$/p" "$1" | grep -Eq "^(version|author|license|platforms|metadata):"' \
     sh "$ROOT/SKILL.md"
-assert "Hermes payload starts with use-when triggering" \
-    grep -q '^  Use when GNOME Shell extension changes' "$ROOT/runtimes/hermes-frontmatter.yaml"
+assert "Hermes payload keeps compact inline triggering" \
+    grep -q '^description: Reload and debug GNOME Shell extensions on Wayland$' "$ROOT/runtimes/hermes-frontmatter.yaml"
 assert "Hermes payload carries versioned platform metadata" sh -c \
     'grep -q "^version: " "$1" && grep -q "^platforms: \[linux\]" "$1" && grep -q "^  hermes:$" "$1"' \
     sh "$ROOT/runtimes/hermes-frontmatter.yaml"
@@ -248,7 +248,7 @@ assert "skill routes no-logout host reloads to Looking Glass, not soft cycle" sh
     'grep -q "reload without logout/login" "$1" && grep -q "Do not silently substitute a soft cycle" "$1" && grep -q -- "--one-line UUID" "$1"' \
     sh "$ROOT/SKILL.md"
 assert "skill requires deploy before Looking Glass and rejects cached-import false proof" sh -c \
-    'grep -q "deploy bytes first, hot-swap second" "$1" && grep -q "proof does not mean that imported code changed" "$1"' \
+    'grep -q "deploy bytes first, hot-swap second" "$1" && grep -q "does not refresh ordinary relative imports" "$1"' \
     sh "$ROOT/SKILL.md"
 assert "skill warns that undefined evaluator output is inconclusive" sh -c \
     'grep -q "evaluator result" "$1" && grep -q "undefined.*inconclusive" "$1"' \

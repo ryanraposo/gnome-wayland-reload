@@ -2,6 +2,7 @@
 set -euo pipefail
 
 NAME="gnome-wayland-reload"
+CANONICAL_DESCRIPTION="Reload and debug GNOME Shell extensions on Wayland"
 REMOTE_BASE="${GNOME_WAYLAND_RELOAD_BASE_URL:-https://ryanraposo.github.io/gnome-wayland-reload}"
 AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
@@ -128,7 +129,10 @@ FILES=(
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
     scripts/diagnose.sh
+    scripts/reload-extension.sh
     scripts/looking-glass-hotswap.sh
+    scripts/looking-glass-inject.sh
+    scripts/lg-autohotswap.py
     scripts/inspect-shell-source.sh
     scripts/check-update.sh
 )
@@ -166,7 +170,17 @@ grep -q '^name: gnome-wayland-reload$' "$stage/SKILL.md" || {
     echo "error: downloaded skill failed identity validation" >&2
     exit 1
 }
-chmod +x "$stage/scripts/"*.sh
+
+skill_description="$(sed -n 's/^description: //p' "$stage/SKILL.md" | head -n1)"
+hermes_description="$(sed -n 's/^description: //p' "$stage/runtimes/hermes-frontmatter.yaml" | head -n1)"
+[ "$skill_description" = "$CANONICAL_DESCRIPTION" ] || \
+    error "canonical Agent description drifted: $skill_description"
+[ "$hermes_description" = "$CANONICAL_DESCRIPTION" ] || \
+    error "canonical Hermes description drifted: $hermes_description"
+[ "${#CANONICAL_DESCRIPTION}" -lt 60 ] || \
+    error "canonical skill description must remain under 60 characters"
+
+chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py
 
 mkdir -p "$STATE_HOME/backups"
 stamp="$(date +%Y%m%d-%H%M%S)-$$"
@@ -198,15 +212,8 @@ install_target() {
         rm -f "$temp_target/.skill-body"
         rm -rf "$temp_target/agents" "$temp_target/runtimes"
     else
-        cat >"$temp_target/.openai-frontmatter.yaml" <<'EOF'
----
-name: gnome-wayland-reload
-description: Reload GNOME extensions on Wayland without restarting the compositor.
----
-EOF
-        tail -n +3 "$stage/SKILL.md" | awk '/^---$/{s++;next} s>=2{exit}1' \
-            >>"$temp_target/.openai-frontmatter.yaml"
-        mv "$temp_target/.openai-frontmatter.yaml" "$temp_target/SKILL.md"
+        # The canonical SKILL.md frontmatter is already the Agent Skills payload.
+        # Preserve it verbatim so installer logic can never fork the description.
         rm -rf "$temp_target/runtimes"
     fi
     printf 'managed-by=%s\nsource=https://github.com/ryanraposo/%s\n' \
@@ -267,6 +274,7 @@ case "$MODE" in
         ;;
 esac
 printf '  \033[33mLaunch:\033[0m       %s\n' "$launch_path"
+printf '  \033[33mHost reload:\033[0m  %s\n' "$(dirname "$launch_path")/reload-extension.sh SOURCE_OR_REPO"
 printf '  \033[33mDiagnose:\033[0m     %s\n' "$(dirname "$launch_path")/diagnose.sh"
 case "$MODE" in
     agents)

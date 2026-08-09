@@ -1,19 +1,6 @@
 ---
 name: gnome-wayland-reload
-description: >-
-  Diagnose, develop, reload, and recover GNOME Shell extensions on GNOME
-  49–50 Wayland without killing the compositor. Use whenever a user asks to
-  reload, restart, or refresh an extension; says edited extension.js, imported
-  JavaScript, metadata.json, stylesheet.css, prefs.js, or GSettings schemas are
-  not taking effect; reports that disable/enable did not load new code, an
-  extension is ACTIVE or ERROR but its UI is missing, duplicated, stuck, or
-  behaving strangely, or animations reset after polling; needs GNOME Shell
-  logs, Looking Glass, a cache-busted host hot-swap, lifecycle cleanup, schema
-  compilation, or a nested gnome-shell --devkit session; needs to prove that
-  installed bytes are actually running; or asks whether Alt+F2 r,
-  gnome-shell --replace, logout/login, or another Shell restart is safe or
-  necessary on Wayland. Do not use for ordinary GNOME app automation or
-  screenshots unrelated to Shell-extension reload, development, or recovery.
+description: Reload and debug GNOME Shell extensions on Wayland
 ---
 
 # Reload GNOME Extensions on Wayland
@@ -72,8 +59,8 @@ recovering from a partial reload, or deciding whether host logout is justified.
 | GSettings value | Usually live; soft-cycle only if the extension does not react |
 | `stylesheet.css` | Soft-cycle first |
 | `prefs.js` or preference-only imports | Close and reopen preferences |
-| `extension.js` or a Shell-side imported `.js` module | Fresh nested Shell; otherwise host logout/login |
-| Visible host extension, no logout/login, change confined to top-level `extension.js` | Guarded Looking Glass hot-swap (advanced/private) |
+| Already-`ACTIVE` host extension; top-level `extension.js` changed | Deploy + Looking Glass live reload with `scripts/reload-extension.sh` |
+| Shell-side imported `.js` module changed | Fresh nested Shell; otherwise host logout/login |
 | `metadata.json` | Fresh nested Shell; otherwise host logout/login |
 | GSettings schema XML | Compile schemas, then restart the process that consumes them |
 | Native library, typelib, or Shell process state | Fresh nested Shell; otherwise host logout/login |
@@ -81,49 +68,63 @@ recovering from a partial reload, or deciding whether host logout is justified.
 Do not claim that disable/enable loads edited Shell-side JavaScript. GJS cannot
 unload an already-imported module from the running Shell process.
 
-A cache-busted dynamic import from Looking Glass can hot-swap a simple
-`extension.js` for diagnosis on the host. This relies on private GNOME Shell
-internals, leaves the old module resident, and does not refresh ordinary
-relative imports. Keep the nested Shell as the supported development loop; use
-the hot-swap only when preserving current host-session state is materially
-useful. See `references/gnome-50-debugging-notes.md` for the guarded recipe and
+A cache-busted dynamic import from Looking Glass can load a fresh top-level
+`extension.js` into the live host and replace the active extension instance.
+This relies on private GNOME Shell internals, leaves old modules resident, and
+does not refresh ordinary relative imports. For an already-installed,
+already-`ACTIVE` development extension with a top-level `extension.js` change,
+this is the canonical no-logout live-development path. Use a fresh nested Shell
+when relative imports, metadata, schemas, native code, or process globals changed.
+See `references/gnome-50-debugging-notes.md` for the guarded transaction and
 recovery limits.
 
 Treat "reload without logout/login," "reload the visible host extension," or
-an explicit request to use Looking Glass as a request for this guarded host
-hot-swap when the edited code is confined to top-level `extension.js` and
-cleanup is reliable. State that mechanism before acting. Do not silently substitute a soft cycle:
-it only reruns lifecycle methods and cannot load fresh Shell-side JavaScript.
-If imports, metadata, schemas, native code, or process
-globals changed, explain that Looking Glass cannot refresh them and use a fresh
-nested Shell while leaving the host session intact.
+an explicit request to use Looking Glass as a request for this live host path
+when the edited runtime change is confined to top-level `extension.js` and
+cleanup is reliable. Do not silently substitute a soft cycle: it only reruns
+lifecycle methods and cannot load fresh Shell-side JavaScript.
 
-Before any host hot-swap, sync or install the edited repo files into the
-extension directory returned by `manager.lookup(uuid).dir`, then compare the
-changed source and installed bytes. Looking Glass imports the installed copy;
-it does not deploy the checkout. Treat "reload + Looking Glass" as this ordered
-pair: deploy bytes first, hot-swap second.
+The live path is an ordered pair: deploy bytes first, hot-swap second. Prefer
+the bundled wrapper when source is available:
+
+```bash
+scripts/reload-extension.sh /path/to/extension-or-repo
+```
+
+It discovers a single extension beneath a repository when needed, reads its
+UUID from `metadata.json`, requires the installed target to be `ACTIVE`, copies
+the source tree into the installed extension directory, proves the top-level
+`extension.js` bytes match, then delegates to the receipt-backed Looking Glass
+injector. Already installed and already enabled is the expected case, not a
+blocker. The command does not lifecycle-cycle the extension and does not log out.
 
 ## Development Workflow
 
-For iterative editing of extension code, the fastest cycle uses a nested
-development Shell:
+For iterative host development of top-level `extension.js`, use the live loop:
 
-1. Edit your source files (e.g., `extension.js`).
+1. Edit the extension source.
+2. Run `scripts/reload-extension.sh /path/to/extension-or-repo`.
+3. Let the helper deploy the source tree and execute the Looking Glass
+   transaction against the already-`ACTIVE` instance.
+4. Verify the receipt plus one runtime marker or observable behavior unique to
+   the new code.
+5. Repeat with a fresh transaction for the next top-level change.
+
+Do not add a disable/enable step before this loop. The active installed instance
+is the state the Looking Glass transaction replaces.
+
+When a relative import, `metadata.json`, schema consumer, native library, or
+Shell process global changed, use a fresh nested Shell instead:
+
+1. Edit the source files.
 2. Close the nested Shell window.
-3. Relaunch it: `scripts/dev-shell.sh`.
-4. Open Looking Glass (`Alt`+`F2`, type `lg`) → Extensions tab to verify
-   loaded state and errors.
-5. Check journal output: `journalctl --no-pager -u gnome-shell | grep -i UUID`.
-
-For quick iterations on top-level `extension.js` only, you can hot-swap without
-closing the nested Shell — see below. Imported modules never change via
-hot-swap (GJS caches relative specifiers); always relaunch the nested Shell.
+3. Relaunch it with `scripts/dev-shell.sh`.
+4. Inspect Looking Glass and the journal inside that fresh session.
 
 Verify changes across three layers: installed file hash matches source, journal
-shows a fresh load entry, and observable behavior confirms the update. Captures
-one animation loop period apart can look identical even when working — check at
-non-harmonic offsets.
+shows fresh runtime evidence, and observable behavior confirms the update.
+Captures one animation loop period apart can look identical even when working —
+check at non-harmonic offsets.
 
 ## Establish the Target
 
@@ -181,8 +182,8 @@ curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash
 ```
 
 It installs `mutter-dev-bin` through a narrow graphical privilege prompt. This
-enables fresh GNOME Shell test sessions in a window, so edited extension code
-can load without logging out or restarting the real desktop. If a deliberately
+enables fresh GNOME Shell test sessions in a window, so imported Shell-side code
+can load without logging out or restarting your real desktop. If a deliberately
 skill-only installation used `--skip-devkit`, install the runner later with
 `pkexec apt-get install -y mutter-dev-bin`.
 
@@ -200,59 +201,176 @@ dbus-run-session env G_MESSAGES_DEBUG=all SHELL_DEBUG=all \
 ```
 
 Enable or inspect the extension from a terminal inside the nested desktop.
-After editing Shell-side JavaScript, close the nested Shell window and launch
-it again. This creates a genuinely fresh GJS process without touching the host
-desktop.
+After editing imported Shell-side JavaScript, close the nested Shell window and
+launch it again. This creates a genuinely fresh GJS process without touching the
+host desktop.
 
 Treat the nested Shell as disposable, not sandboxed. It has little isolation,
 shares the user's home directory and settings, and can still modify user data.
 
-## Hot-Swap One Top-Level Module (Advanced)
+## Deploy and Reload the Live Host
 
-When a host-only state is expensive to recreate and the change is confined to
-the top-level `extension.js`, generate the canonical guarded Looking Glass
-payload and drive Looking Glass via `computer_use`:
+The complete source-to-runtime command is:
 
-1. Generate the payload:
+```bash
+scripts/reload-extension.sh [--no-wait] [--token TOKEN] /path/to/extension-or-repo
+```
+
+Use it when the target is already installed and `ACTIVE`, the runtime change is
+confined to top-level `extension.js`, and the extension's cleanup is reliable.
+It deploys first and then delegates to `scripts/looking-glass-inject.sh`.
+
+The lower-level transaction owns this strict state machine:
+
+```text
+PREPARED → OPEN_LOOKING_GLASS → EVALUATOR_LOCATED → PAYLOAD_INSERTED
+→ PAYLOAD_VERIFIED → EXECUTED → TOKEN_VERIFIED → BEHAVIOR_VERIFIED
+```
+
+Do not skip, reorder, or silently infer a completed stage.
+
+### Prepare a durable receipt
+
+After deploying the edited file and proving that source and installed bytes
+match, prepare the exact one-line payload:
+
+```bash
+PREPARED_JSON="$(scripts/looking-glass-hotswap.sh prepare "$UUID")"
+RECEIPT="$(python3 -c \
+  'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' \
+  "$PREPARED_JSON")"
+PAYLOAD="$(scripts/looking-glass-hotswap.sh show "$RECEIPT")"
+```
+
+`prepare` creates private `0600` payload and receipt files, records the UUID,
+unique token, exact marker, preparation timestamp, payload path, and SHA-256,
+and reports `status=PREPARED`. `show` refuses altered payload bytes or a receipt
+that has already advanced. Never hand-write, shorten, reformat, or regenerate
+the payload after preparation.
+
+### Automated injection via `scripts/looking-glass-inject.sh`
+
+Preferred lower-level path when cua-driver is available on the host:
+
+```bash
+scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+```
+
+This single command chains: `prepare → show → drive Looking Glass GUI → executed → verify`.
+It drives Alt+F2 → type "lg" → Enter → click Extensions → find Evaluator → paste
+the full one-line payload → press Enter → poll journal for the proof marker.
+
+Options:
+- `--no-wait` — skip journal polling, report verification status immediately.
+- `--token TOKEN` — supply a deterministic token for testing or audit trails.
+
+Exit codes:
+- `0` — injected and verified ok=true.
+- `1` — injection succeeded but proof/verification failed.
+- `2` — usage, dependency, or integrity error.
+- `3` — verification inconclusive; re-check may resolve.
+
+The script writes progress to stderr and the full receipt JSON (pretty-printed)
+to stdout on success (`0`). On failure it emits diagnostics on stderr and exits
+non-zero so consumers can decide whether to escalate.
+
+If the injected Python driver (`lg-autohotswap.py`) cannot connect to cua-driver
+or cannot find the Evaluator UI element, the shell script falls back to manual
+computer-use guidance below. It records the payload to a temporary file and
+prints its location so the agent can complete the sequence manually.
+
+### Manual injection through computer use
+
+Use this path when cua-driver is unavailable or the UI requires visual control.
+Advance one observed stage at a time:
+
+1. Send `Alt+F2`; capture and confirm the GNOME run dialog is open.
+2. Type `lg`, press Return, then capture and confirm Looking Glass opened.
+3. Capture the current evaluator entry. Do not guess a stale element index from
+   an earlier capture.
+4. Click the evaluator and type the exact one-line `$PAYLOAD`.
+5. Capture before execution. Confirm the entry begins with the expected
+   `const uuid = '…';`, contains the receipt token, and ends with
+   `JSON.stringify(proof)`. Any truncation or mismatch means abort this attempt
+   without pressing Return.
+6. Press Return exactly once. Never retry the payload merely because the visible
+   evaluator result is truncated, `undefined`, or unclear.
+7. Immediately record the one-shot submission:
    ```bash
-   LOOKSGLASS_JQ="$(scripts/looking-glass-hotswap.sh "$UUID")"
+   scripts/looking-glass-hotswap.sh executed "$RECEIPT"
    ```
-2. Verify the stderr warning lines contain your `reload_token`.
-3. Use `computer_use` (preferably `mode='som'`) to drive these steps in sequence:
-   a. `key="alt+F2"` — opens the GNOME run-dialog overlay.
-   b. Type `lg` then `key="return"` — launches Looking Glass.
-   c. `capture(mode='som')` to locate the JavaScript evaluator input box
-      (usually labeled "JavaScript evaluation" or similar).
-   d. `click <evaluator_element_index>` then `type text="$LOOKSGLASS_JQ"`.
-   e. `key="return"` — execute the payload.
-   f. Capture again to confirm the evaluator shows the proof JSON or `undefined`
-      (LG evaluator suppresses long results; this is normal).
-   g. Verify the proof token appears in journal:
-      ```bash
-      journalctl --since '30 seconds ago' /usr/bin/gnome-shell | grep -i "$UUID"
-      ```
-4. If the journal confirms `ok=true` and the correct `reload_token`, the
-   hot-swap succeeded.
+   This closes the abort window and advances the receipt to `EXECUTED`.
 
-Before any host hot-swap, deploy the updated source files into the extension directory
-(returned by `scripts/diagnose.sh` or `gnome-extensions info UUID`). Looking Glass
-imports from the installed location, not the git checkout. For GUI-typed payloads, use
-`looking-glass-hotswap.sh --one-line UUID` instead of the multiline variant.
+Treat an evaluator result of `undefined` as inconclusive; it is never proof and
+never permission to execute the payload again.
 
-Do not use this for imported modules, metadata, schemas, native code, repeated
-development cycles, or an extension whose cleanup is not known to be
-idempotent. Immediately verify the emitted token, `ACTIVE` state,
-`stateObjectReplaced`, fresh logs, and behavior. Use a fresh nested Shell if
-anything is uncertain. Treat an evaluator result of `undefined` as inconclusive,
-not failure: check the helper's proof token and a runtime marker unique to the
-new version before attempting another hot-swap.
+If execution has not happened, close the workflow cleanly with:
 
-The proof only establishes replacement of the top-level state object. If
-`extension.js` statically imports an edited relative module, the unchanged
-specifier still resolves to the module already cached by GJS; a successful
-proof does not mean that imported code changed. Use a fresh nested Shell, or a
-project-specific import-aware reload that gives every edited module a unique
-URI. Never repeat the top-level payload and claim the imported change loaded.
+```bash
+scripts/looking-glass-hotswap.sh abort "$RECEIPT"
+```
+
+`abort` is valid only while the receipt is `PREPARED`. Once Return has been
+pressed, record `executed` even if the evaluator output is unclear.
+
+### Verify from the durable receipt
+
+After recording the single execution, run:
+
+```bash
+scripts/looking-glass-hotswap.sh verify "$RECEIPT"
+```
+
+The verifier accepts only `EXECUTED` or previously `INCONCLUSIVE` receipts. It
+searches current-boot Shell journal entries from the recorded preparation time,
+requires the receipt's exact token marker, parses its structured proof, checks
+UUID and token equality, requires `phase=complete`,
+`stateObjectReplaced=true`, extension-order bookkeeping restoration, and an
+independent `gnome-extensions info` state of `ACTIVE`.
+
+Interpret its exit status and persisted receipt literally:
+
+- `0 / VERIFIED` — transaction proof is complete; continue to observable
+  behavior verification.
+- `1 / FAILED` — the exact invocation ran but replacement or proof failed. Read
+  `journal_proof.phase` and `journal_proof.rollback`; do not execute again.
+- `2` — usage, receipt, dependency, or integrity error. If Return was already
+  pressed, preserve the receipt and do not execute again.
+- `3 / INCONCLUSIVE` — exact proof is absent or malformed. Inspect the receipt
+  and journal, then safely rerun `verify` against the same receipt. Never rerun
+  the payload.
+
+The generated transaction refuses a target that is not already `ACTIVE`, lacks
+a live state object, is absent from extension order, or does not expose the
+expected private manager methods. Import and construction occur before host
+mutation. A replacement-enable failure attempts and proves restoration of the
+previous state object, `ACTIVE` state, replacement cleanup, and extension-order
+bookkeeping. Failure to restore bookkeeping fails closed and enters rollback.
+If the current instance fails while disabling, the receipt explicitly requires
+manual recovery; it never calls that an automatic rollback success.
+
+GNOME's internal disable path may temporarily cycle extensions ordered after
+the target. The payload restores manager order bookkeeping, but it cannot erase
+arbitrary side effects produced by another extension's lifecycle methods. Treat
+those as part of the remaining behavioral proof.
+
+Before completion, verify a runtime marker or behavior unique to the new code.
+The receipt proves the exact top-level state-object transaction; it does not
+prove that a statically imported relative module changed. A successful proof
+does not mean that imported code changed. For imported modules, metadata,
+schemas, native code, or process globals, move to a fresh nested Shell. Repeated
+top-level `extension.js` iterations may use this live path with a fresh receipt
+each time when cleanup remains reliable.
+
+For direct human inspection, the generator still supports:
+
+```bash
+scripts/looking-glass-hotswap.sh --one-line UUID
+```
+
+The deploy + receipt-backed injection path is canonical for live host top-level
+reloads; `prepare → show → executed → verify` remains the canonical lower-level
+transaction for agents.
 
 ## Reload Preferences and Schemas
 
@@ -296,8 +414,8 @@ journalctl -f -o cat /usr/bin/gnome-shell |
 
 Open Looking Glass with `Alt`+`F2`, then `lg`. Use its Extensions page to
 inspect loaded state, errors, source location, and metadata. Looking Glass does
-not defeat module caching by itself. A normal disable/enable from Looking
-Glass still uses the cached module.
+not defeat module caching by itself. A normal disable/enable from Looking Glass
+still uses the cached module.
 
 Do not treat matching source and installed-file hashes as proof that those
 bytes are running. Verify three layers: the installed artifact, the extension's

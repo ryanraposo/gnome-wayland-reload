@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Definitive GNOME 50 Wayland extension reload workflows without restarting the host desktop.">
+  <meta name="description" content="State-aware, verified GNOME Wayland extension reload without restarting the host desktop.">
   <title>gnome-wayland-reload</title>
   <style>
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#000;font-family:"Courier New",monospace;padding:36px 20px}main{width:min(760px,100%);text-align:center}.mascot{display:inline-block;margin:0;line-height:1.05;font-size:20px;text-align:left}h1{font-size:clamp(1.7rem,5vw,2.45rem);margin:14px 0 8px}p{color:#555;line-height:1.65}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:28px 0}.card{text-align:left;border:1px solid #d8d8d8;border-radius:10px;padding:16px;font-size:13px;line-height:1.55;color:#555}.card strong{display:block;color:#000;margin-bottom:6px}.curl{display:flex;gap:12px;align-items:center;background:#f5f5f5;border:1px solid #ddd;border-radius:10px;padding:15px;text-align:left;overflow:auto}.curl code{font:13px inherit;white-space:nowrap}.curl button{margin-left:auto;background:#fff;border:1px solid #aaa;border-radius:6px;padding:7px 10px;cursor:pointer}.curl button:hover{background:#000;color:#fff}.note{border-left:3px solid #000;background:#fafafa;padding:13px 16px;text-align:left;font-size:13px;margin:18px 0}.links{font-size:13px;margin-top:26px}.links a{color:#000}@media(max-width:650px){.grid{grid-template-columns:1fr}.curl{align-items:flex-start}.curl button{position:sticky;right:0}}
@@ -17,19 +17,19 @@
     █  ███  █  █
      ▀▀   ▀▀   █</pre>
     <h1>gnome-wayland-reload</h1>
-    <p>Fresh extension code. Disposable nested Shells.<br>No ceremonial logout.</p>
+    <p>State-aware extension reload for GNOME Wayland.<br>Fresh code. Exact proof. No ceremonial logout.</p>
     <p><small>Reloop, the nested-Shell mechanic.</small></p>
     <div class="grid">
-      <div class="card"><strong>Lifecycle</strong>Soft-cycle one enabled extension when cleanup or settings reaction is enough.</div>
-      <div class="card"><strong>Fresh code</strong>Run GNOME 50 in a nested devkit window and restart only that disposable process.</div>
-      <div class="card"><strong>Preferences</strong>Close and reopen the separate GJS preferences process; compile schemas when needed.</div>
-      <div class="card"><strong>Host diagnostic</strong>Generate a guarded Looking Glass hot-swap for one top-level module when host state matters.</div>
+      <div class="card"><strong>Live host</strong>For an ACTIVE extension with a top-level <code>extension.js</code> change: exact deploy, automated Looking Glass replacement, receipt-backed runtime proof.</div>
+      <div class="card"><strong>Fresh process</strong>Imported modules, metadata, native state, and process globals go to a disposable nested Shell instead of pretending cached code was reloaded.</div>
+      <div class="card"><strong>Lifecycle</strong>Soft-cycle one enabled extension when cleanup, settings reaction, stylesheet, or resource refresh is the real boundary.</div>
+      <div class="card"><strong>Preferences + schemas</strong>Reopen the separate preferences process and compile schemas when their consumers need fresh state.</div>
     </div>
     <div class="curl">
       <code id="command">curl -fsSL https://ryanraposo.github.io/gnome-wayland-reload/install.sh | bash</code>
       <button id="copy" type="button">copy</button>
     </div>
-    <div class="note"><strong>Hard boundary:</strong> the host GNOME Shell is the Wayland compositor. Disable/enable does not reload edited JavaScript, and killing the host ends the graphical session.</div>
+    <div class="note"><strong>Hard boundary:</strong> the host GNOME Shell is the Wayland compositor. Disable/enable does not unload imported JavaScript, and killing the host ends the graphical session.</div>
     <div class="links"><a href="https://github.com/ryanraposo/gnome-wayland-reload">github</a> · <a href="https://gjs.guide/extensions/development/debugging.html">GNOME guide</a> · MIT</div>
   </main>
   <script>
