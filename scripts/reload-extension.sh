@@ -20,7 +20,7 @@ metadata.json is discovered within six directory levels.
 Routes:
   HOST_HOTSWAP   ACTIVE + top-level extension.js: deploy, prove bytes, Looking Glass
   SOFT_CYCLE     stylesheet/resource-only change: deploy, lifecycle recycle
-  PREFS_REOPEN   prefs-only change: deploy, reopen preferences in a fresh gjs process
+  PREFS_REOPEN   prefs-only change: deploy, require preferences reopen
   FRESH_PROCESS  imported JS / metadata / native change: deploy, use a fresh nested Shell
   SCHEMA_REFRESH schema XML changed: deploy, compile schemas, refresh consumers
   REPAIR         installed extension is in ERROR: deploy, diagnose, use a fresh process
@@ -99,14 +99,9 @@ else
             -not -path '*/venv/*' \
             -print
     )
-
     case "${#metadata_files[@]}" in
-        0)
-            fail "no extension metadata.json found under $source_root"
-            ;;
-        1)
-            source_dir="$(dirname "${metadata_files[0]}")"
-            ;;
+        0) fail "no extension metadata.json found under $source_root" ;;
+        1) source_dir="$(dirname "${metadata_files[0]}")" ;;
         *)
             printf 'error: multiple extension metadata.json files found; pass the extension directory directly:\n' >&2
             printf '  %s\n' "${metadata_files[@]}" >&2
@@ -123,7 +118,6 @@ import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     metadata = json.load(handle)
-
 uuid = metadata.get("uuid")
 if not isinstance(uuid, str) or not uuid.strip():
     raise SystemExit("metadata.json has no non-empty string uuid")
@@ -163,15 +157,18 @@ from pathlib import Path
 source = Path(sys.argv[1]).resolve()
 installed = Path(sys.argv[2]).resolve()
 ignored_dirs = {".git", ".github", "node_modules", ".venv", "venv", "__pycache__"}
+ignored_paths = {"schemas/gschemas.compiled"}
+
 
 def digest(path: Path) -> str:
     if path.is_symlink():
         return "symlink:" + os.readlink(path)
-    h = hashlib.sha256()
+    value = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+            value.update(chunk)
+    return value.hexdigest()
+
 
 def manifest(root: Path) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -181,21 +178,22 @@ def manifest(root: Path) -> dict[str, str]:
         for name in files:
             path = current_path / name
             rel = path.relative_to(root).as_posix()
+            if rel in ignored_paths:
+                continue
             try:
                 result[rel] = digest(path)
             except FileNotFoundError:
                 pass
     return result
 
+
 def git_dirty_paths(root: Path) -> list[str]:
     try:
-        repo = Path(
-            subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        ).resolve()
+        repo = Path(subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()).resolve()
         rel_root = root.relative_to(repo).as_posix()
         scope = "." if rel_root == "." else rel_root
         changed = subprocess.check_output(
@@ -211,17 +209,19 @@ def git_dirty_paths(root: Path) -> list[str]:
     except (subprocess.CalledProcessError, ValueError):
         return []
 
-    paths: set[str] = set()
     prefix = "" if rel_root == "." else rel_root.rstrip("/") + "/"
+    paths: set[str] = set()
     for item in changed + untracked:
         item = item.strip()
         if not item:
             continue
         if prefix and item.startswith(prefix):
             item = item[len(prefix):]
-        if not any(part in ignored_dirs for part in Path(item).parts):
-            paths.add(item)
+        if item in ignored_paths or any(part in ignored_dirs for part in Path(item).parts):
+            continue
+        paths.add(item)
     return sorted(paths)
+
 
 if source == installed:
     changed = git_dirty_paths(source)
@@ -239,23 +239,16 @@ else:
 lower = [path.lower() for path in changed]
 basenames = [Path(path).name.lower() for path in changed]
 
-def any_suffix(*suffixes: str) -> bool:
-    return any(path.endswith(suffixes) for path in lower)
-
 route = "HOST_HOTSWAP"
 reason = "top-level extension.js can be cache-busted and replaced in an ACTIVE host Shell"
 
 if any(name == "metadata.json" for name in basenames):
     route = "FRESH_PROCESS"
     reason = "metadata changed and requires a fresh Shell process"
-elif any(
-    path.endswith(".gschema.xml")
-    or "/schemas/" in f"/{path}"
-    for path in lower
-):
+elif any(path.endswith(".gschema.xml") for path in lower):
     route = "SCHEMA_REFRESH"
     reason = "schema XML changed and its consumers need freshly compiled schema state"
-elif any_suffix(".so", ".typelib"):
+elif any(path.endswith((".so", ".typelib")) for path in lower):
     route = "FRESH_PROCESS"
     reason = "native or typelib state changed and cannot be unloaded from the host Shell"
 else:
@@ -288,12 +281,7 @@ else:
         route = "SOFT_CYCLE"
         reason = "resource-only changes are safest to pick up through the extension lifecycle"
 
-print(json.dumps({
-    "route": route,
-    "reason": reason,
-    "basis": basis,
-    "changed": changed,
-}, sort_keys=True))
+print(json.dumps({"route": route, "reason": reason, "basis": basis, "changed": changed}, sort_keys=True))
 PY
 )"
 
@@ -304,8 +292,7 @@ CHANGED="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1])["
 
 ROUTE="$ARTIFACT_ROUTE"
 case "$STATE" in
-    ACTIVE)
-        ;;
+    ACTIVE) ;;
     ERROR)
         ROUTE="REPAIR"
         REASON="the installed extension is in ERROR; deploy the candidate bytes, inspect the failure, and use a fresh process for Shell-side code"
@@ -342,11 +329,11 @@ deploy_source() {
         return
     fi
 
-    printf '[reload] deploying source tree into installed extension directory ...\n' >&2
+    printf '[reload] mirroring source tree into installed extension directory ...\n' >&2
     python3 - "$source_dir" "$installed_dir" <<'PY'
 from __future__ import annotations
 
-import filecmp
+import hashlib
 import os
 import shutil
 import sys
@@ -355,17 +342,61 @@ from pathlib import Path
 source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 ignored_dirs = {".git", ".github", "node_modules", ".venv", "venv", "__pycache__"}
+# Compiled schemas are generated runtime state, not source-managed bytes.
+ignored_paths = {"schemas/gschemas.compiled"}
+
+
+def digest(path: Path) -> str:
+    if path.is_symlink():
+        return "symlink:" + os.readlink(path)
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def manifest(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [name for name in dirs if name not in ignored_dirs]
+        current_path = Path(current)
+        for name in files:
+            path = current_path / name
+            rel = path.relative_to(root).as_posix()
+            if rel in ignored_paths:
+                continue
+            result[rel] = digest(path)
+    return result
+
+
+source_manifest = manifest(source)
+target_manifest = manifest(target)
+
+# Remove stale source-managed files first. The installed root itself is never
+# replaced, so a user extension symlink remains a symlink.
+for rel in sorted(set(target_manifest) - set(source_manifest), reverse=True):
+    stale = target / rel
+    if stale.is_dir() and not stale.is_symlink():
+        shutil.rmtree(stale)
+    else:
+        stale.unlink(missing_ok=True)
 
 for current, dirs, files in os.walk(source):
     dirs[:] = [name for name in dirs if name not in ignored_dirs]
     current_path = Path(current)
     rel_dir = current_path.relative_to(source)
     target_dir = target / rel_dir
+    if target_dir.is_symlink() and rel_dir != Path('.'):
+        target_dir.unlink()
     target_dir.mkdir(parents=True, exist_ok=True)
 
     for name in files:
         src = current_path / name
-        dst = target_dir / name
+        rel = src.relative_to(source).as_posix()
+        if rel in ignored_paths:
+            continue
+        dst = target / rel
         if src.is_symlink():
             link = os.readlink(src)
             if dst.is_symlink() and os.readlink(dst) == link:
@@ -381,19 +412,35 @@ for current, dirs, files in os.walk(source):
                 dst.unlink()
             elif dst.is_dir():
                 shutil.rmtree(dst)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
-for current, dirs, files in os.walk(source):
-    dirs[:] = [name for name in dirs if name not in ignored_dirs]
+# Remove empty target-only directories after stale files are gone.
+for current, dirs, _files in os.walk(target, topdown=False):
     current_path = Path(current)
-    for name in files:
-        src = current_path / name
-        dst = target / src.relative_to(source)
-        if src.is_symlink():
-            if not dst.is_symlink() or os.readlink(src) != os.readlink(dst):
-                raise SystemExit(f"deployed symlink mismatch: {src.relative_to(source)}")
-        elif not dst.is_file() or not filecmp.cmp(src, dst, shallow=False):
-            raise SystemExit(f"deployed file mismatch: {src.relative_to(source)}")
+    if current_path == target:
+        continue
+    rel = current_path.relative_to(target)
+    if any(part in ignored_dirs for part in rel.parts):
+        continue
+    source_peer = source / rel
+    if not source_peer.exists() and not source_peer.is_symlink():
+        try:
+            current_path.rmdir()
+        except OSError:
+            pass
+
+final_manifest = manifest(target)
+if final_manifest != source_manifest:
+    missing = sorted(set(source_manifest) - set(final_manifest))
+    extra = sorted(set(final_manifest) - set(source_manifest))
+    changed = sorted(
+        path for path in set(source_manifest) & set(final_manifest)
+        if source_manifest[path] != final_manifest[path]
+    )
+    raise SystemExit(
+        f"deployment manifest mismatch: missing={missing} extra={extra} changed={changed}"
+    )
 PY
 }
 
@@ -441,7 +488,7 @@ case "$ROUTE" in
         deploy_source
         print_plan >&2
         printf 'next=close the existing preferences window, then run: gnome-extensions prefs %q\n' "$UUID" >&2
-        exit 0
+        exit 4
         ;;
     SOFT_CYCLE)
         deploy_source
