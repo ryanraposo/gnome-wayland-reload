@@ -4,15 +4,28 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$ROOT/scripts/reload-extension.sh"
 INJECT_SCRIPT="$ROOT/scripts/looking-glass-inject.sh"
+DRIVER="$ROOT/scripts/lg-autohotswap.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Packaging proof: the installed skill must contain the complete live-reload chain.
+# Packaging proof: exactly one installed live-reload driver path.
 grep -F 'scripts/reload-extension.sh' "$ROOT/install.sh" >/dev/null
 grep -F 'scripts/looking-glass-inject.sh' "$ROOT/install.sh" >/dev/null
 grep -F 'scripts/lg-autohotswap.py' "$ROOT/install.sh" >/dev/null
 grep -F 'scripts/diagnose.sh' "$ROOT/install.sh" >/dev/null
 grep -F 'chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py' "$ROOT/install.sh" >/dev/null
+[ ! -e "$ROOT/scripts/lg-autohotswap.sh" ]
+
+# CUA contract proof: SOM supplies click indices; Wayland fallback is ydotool.
+grep -F 'mode="som"' "$DRIVER" >/dev/null
+grep -F 'ydotool' "$DRIVER" >/dev/null
+! grep -F 'i + 1' "$DRIVER" >/dev/null
+! grep -F 'last_text' "$DRIVER" >/dev/null
+python3 - "$DRIVER" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+compile(path.read_text(encoding="utf-8"), str(path), "exec")
+PY
 
 REPO="$TMP/horner-like-repo"
 SOURCE="$REPO/manifestations/desktop/extension/test@example.com"
@@ -101,10 +114,7 @@ env "${COMMON_ENV[@]}" bash "$SCRIPT" --plan "$REPO" > "$TMP/plan.out"
 grep -Fx 'route=HOST_HOTSWAP' "$TMP/plan.out" >/dev/null
 grep -F 'changed=' "$TMP/plan.out" | grep -F 'extension.js' >/dev/null
 grep -F 'StaleExtension' "$INSTALLED_REAL/extension.js" >/dev/null
-[ ! -s "$CALLS" ] || {
-    # gnome-extensions info is inspection and is expected; no mutation helpers may run.
-    ! grep -Eq '^(injector|recycler|diagnose) ' "$CALLS"
-}
+[ ! -s "$CALLS" ] || ! grep -Eq '^(injector|recycler|diagnose) ' "$CALLS"
 
 : > "$CALLS"
 env "${COMMON_ENV[@]}" \
@@ -116,6 +126,26 @@ cmp -s "$SOURCE/asset.txt" "$INSTALLED_REAL/asset.txt"
 grep -Fx 'injector --no-wait --token horner-proof test@example.com' "$CALLS" >/dev/null
 ! grep -q '^recycler ' "$CALLS"
 
+# Generated schemas are runtime state and must not invent a schema-change route.
+mkdir -p "$INSTALLED_REAL/schemas"
+printf 'compiled runtime state\n' > "$INSTALLED_REAL/schemas/gschemas.compiled"
+env "${COMMON_ENV[@]}" bash "$SCRIPT" --plan "$REPO" > "$TMP/generated-schema-plan.out"
+grep -Fx 'route=HOST_HOTSWAP' "$TMP/generated-schema-plan.out" >/dev/null
+
+# Target-only imported code forces a fresh boundary and is removed by deployment.
+printf 'export const stale = true;\n' > "$INSTALLED_REAL/stale-helper.js"
+: > "$CALLS"
+env "${COMMON_ENV[@]}" bash "$SCRIPT" --plan "$REPO" > "$TMP/stale-plan.out"
+grep -Fx 'route=FRESH_PROCESS' "$TMP/stale-plan.out" >/dev/null
+set +e
+env "${COMMON_ENV[@]}" bash "$SCRIPT" "$REPO" > "$TMP/stale.out" 2> "$TMP/stale.err"
+rc=$?
+set -e
+[ "$rc" -eq 4 ]
+[ ! -e "$INSTALLED_REAL/stale-helper.js" ]
+[ -f "$INSTALLED_REAL/schemas/gschemas.compiled" ]
+[ -L "$INSTALLED_LINK" ]
+
 # Stylesheet-only edits use a lifecycle recycle, not Looking Glass.
 printf '.panel { opacity: 0.9; }\n' > "$SOURCE/stylesheet.css"
 : > "$CALLS"
@@ -126,12 +156,16 @@ grep -Fx 'recycler test@example.com' "$CALLS" >/dev/null
 ! grep -q '^injector ' "$CALLS"
 cmp -s "$SOURCE/stylesheet.css" "$INSTALLED_REAL/stylesheet.css"
 
-# prefs.js is a separate process boundary.
+# prefs.js is a separate process boundary and incomplete until that process reopens.
 printf 'export default class Prefs {}\n' > "$SOURCE/prefs.js"
 : > "$CALLS"
 env "${COMMON_ENV[@]}" bash "$SCRIPT" --plan "$REPO" > "$TMP/prefs-plan.out"
 grep -Fx 'route=PREFS_REOPEN' "$TMP/prefs-plan.out" >/dev/null
+set +e
 env "${COMMON_ENV[@]}" bash "$SCRIPT" "$REPO" > "$TMP/prefs.out" 2> "$TMP/prefs.err"
+rc=$?
+set -e
+[ "$rc" -eq 4 ]
 grep -F 'gnome-extensions prefs' "$TMP/prefs.err" >/dev/null
 ! grep -Eq '^(injector|recycler) ' "$CALLS"
 cmp -s "$SOURCE/prefs.js" "$INSTALLED_REAL/prefs.js"
@@ -286,4 +320,4 @@ GNOME_WAYLAND_RELOAD_DRIVER="$OK_DRIVER" \
 grep -q '^executed ' "$HOTLOG"
 grep -q '^verify ' "$HOTLOG"
 
-echo 'ok - state-aware reload routes and exact-once injector semantics'
+echo 'ok - state-aware reload routes, exact deployment, Wayland targeting, and exact-once injector semantics'
