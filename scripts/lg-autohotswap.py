@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
-"""Automated Looking Glass Injection Driver (lg-autohotswap).
+"""Automate one exact Looking Glass payload submission on GNOME Wayland.
 
-Uses cua-driver to drive GNOME Looking Glass end-to-end:
-    Alt+F2 → type "lg" → enter → click Extensions → click Evaluator → paste payload → enter
-
-Communicates with cua-driver via localhost:6847 TCP socket (standard cua-port).
-Exits 0 with injected=true on success; exits 4+ with diagnostic info on GUI failure.
+Observation and element targeting use cua-driver SOM captures. Keyboard input
+uses cua-driver first and deliberately falls back to ydotool when Wayland input
+delivery needs it. The payload is verified in the evaluator before Enter is
+submitted, so callers can safely treat ``injected=true`` as one submission.
 
 Usage:
     lg-autohotswap.py RECEIPT MARKER PAYLOAD_FILE
 
-Arguments:
-    RECEIPT    Path to the prepared receipt.json from looking-glass-hotswap.sh
-    MARKER     Exact marker string, e.g. [gnome-wayland-reload:token]
-    PAYLOAD_FILE   File containing the one-line JS payload
-
-Returns (one line on stdout):
-    injected=true|false  <diagnostic_json>
+Output:
+    injected=true
+or a diagnostic ``injected=false ...`` on stderr with a non-zero exit status.
 """
 
 from __future__ import annotations
@@ -24,71 +19,66 @@ from __future__ import annotations
 import json
 import os
 import selectors
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 CUA_HOST = os.environ.get("CUA_HOST", "127.0.0.1")
 CUA_PORT = int(os.environ.get("CUA_PORT", "6847"))
-
-# ---------------------------------------------------------------------------
-# Protocol helpers — cua-driver speaks JSON over TCP with length-prefixed frames
-# Frame format: 4 bytes big-endian uint32 length, then that many bytes of JSON
-# ---------------------------------------------------------------------------
+INPUT_MODE = os.environ.get("GNOME_WAYLAND_RELOAD_INPUT", "auto").lower()
+TEXT_ROLES = {"text", "entry", "textfield", "textbox"}
 
 
-def send_frame(sock: socket.socket, obj) -> None:
-    """Send a JSON frame over a cua-driver socket."""
+def send_frame(sock: socket.socket, obj: object) -> None:
     data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     sock.sendall(struct.pack("!I", len(data)) + data)
 
 
-def recv_frame(sock: socket.socket) -> dict:
-    """Receive a single JSON frame from cua-driver."""
-    # Read 4-byte length header
+def recv_frame(sock: socket.socket) -> dict[str, Any]:
     header = b""
     while len(header) < 4:
         chunk = sock.recv(4 - len(header))
         if not chunk:
-            raise ConnectionError("Connection closed waiting for frame header")
+            raise ConnectionError("connection closed waiting for frame header")
         header += chunk
-    length = struct.unpack("!I", header)[0]
 
-    # Read body
+    length = struct.unpack("!I", header)[0]
     body = b""
     while len(body) < length:
         chunk = sock.recv(length - len(body))
         if not chunk:
-            raise ConnectionError("Connection closed waiting for frame body")
+            raise ConnectionError("connection closed waiting for frame body")
         body += chunk
 
-    return json.loads(body.decode("utf-8"))
-
-
-# ---------------------------------------------------------------------------
-# High-level actions wrapping cua-driver frames
-# ---------------------------------------------------------------------------
+    value = json.loads(body.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError("cua-driver returned a non-object response")
+    return value
 
 
 class CuaConnection:
-    """Thin wrapper around a live cua-driver TCP session."""
+    """Small cua-driver client that keeps targeting indices capture-local."""
 
     def __init__(self, host: str = CUA_HOST, port: int = CUA_PORT) -> None:
         self.sock = socket.create_connection((host, port), timeout=5)
         self.sel = selectors.DefaultSelector()
         self.sel.register(self.sock, selectors.EVENT_READ)
 
-    def request(self, method: str, **params) -> dict:
-        """Send a method call and wait for response."""
-        msg = {"jsonrpc": "2.0", "method": method, "params": params}
-        send_frame(self.sock, msg)
-        resp = recv_frame(self.sock)
-
-        if "error" in resp:
-            raise RuntimeError(f"cua-driver error: {resp['error']}")
-        return resp.get("result", {})
+    def request(self, method: str, **params: object) -> dict[str, Any]:
+        send_frame(
+            self.sock,
+            {"jsonrpc": "2.0", "method": method, "params": params},
+        )
+        response = recv_frame(self.sock)
+        if "error" in response:
+            raise RuntimeError(f"cua-driver error: {response['error']}")
+        result = response.get("result", {})
+        return result if isinstance(result, dict) else {}
 
     def close(self) -> None:
         try:
@@ -97,184 +87,267 @@ class CuaConnection:
             pass
         self.sock.close()
 
-    # --- convenience wrappers ---
+    def capture(self) -> dict[str, Any]:
+        """Capture screenshot metadata plus the SOM accessibility index."""
+        return self.request("capture", app="", mode="som")
 
-    def capture(self) -> dict:
-        """Take a screenshot + AX tree capture."""
-        return self.request("capture", app="", mode="ax")
+    def send_key(self, keys: str) -> None:
+        self.request("key", key=keys)
 
-    def send_key(self, keys: str) -> dict:
-        """Send keyboard shortcut(s)."""
-        return self.request("key", key=keys)
+    def type_text(self, text: str) -> None:
+        self.request("type", text=text)
 
-    def type_text(self, text: str) -> dict:
-        """Type text into focused element."""
-        return self.request("type", text=text)
-
-    def click_element(self, element: int) -> dict:
-        """Click by SOM element index."""
-        return self.request("click", element=element)
-
-    def find_elements(self, role: str | None = None, label_contains: str | None = None):
-        """Return list of element dicts matching criteria from current capture."""
-        cap = self.capture()
-        elements = cap.get("elements", [])
-        results = []
-        for i, el in enumerate(elements):
-            if role and el.get("role") != role:
-                continue
-            if label_contains and label_contains.lower() not in el.get("label", "").lower():
-                continue
-            results.append({"index": i + 1, **el})
-        return results
+    def click_element(self, element: int) -> None:
+        self.request("click", element=element)
 
 
-# ---------------------------------------------------------------------------
-# Core automation sequence
-# ---------------------------------------------------------------------------
+def som_elements(capture: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = capture.get("elements", [])
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
-def open_lookin_glass(driver: CuaConnection, retries: int = 2) -> bool:
-    """Open Looking Glass via Alt+F2 → lg → Enter. Returns True on success."""
-    for attempt in range(retries):
-        if attempt > 0:
-            print(f"[auto] Retry {attempt}: opening Looking Glass …", file=sys.stderr)
-            time.sleep(0.5)
-
-        driver.send_key("alt+F2")
-        time.sleep(0.6)
-
-        # Capture and look for either a run-dialog text input or already-open LG
-        cap = driver.capture()
-        elements = cap.get("elements", [])
-
-        # Check if LG is already open (look for "evaluator" button/tab)
-        has_evaluator = any(
-            "evaluator" in el.get("label", "").lower() for el in elements
-        )
-        has_ext = any(
-            "extensions" in el.get("label", "").lower()
-            for el in elements
-            if el.get("role") == "button"
-        )
-        if has_evaluator or has_ext:
-            print("[auto] Looking Glass appears to be open", file=sys.stderr)
-            return True
-
-        # Verify a text input exists (run dialog)
-        has_input = any(
-            el.get("role") in ("text", "entry", "textfield") for el in elements
-        )
-        if not has_input:
-            # Fallback: try clicking center of screen to regain focus, then retry
-            print(
-                "[auto] No text input visible after Alt+F2, refocusing …",
-                file=sys.stderr,
-            )
-            driver.click_element(1)  # Click top-most element
-            time.sleep(0.3)
-            driver.send_key("alt+F2")
-            time.sleep(0.6)
-
-        # Type "lg"
-        driver.type_text("lg")
-        time.sleep(0.3)
-
-        # Press Enter
-        driver.send_key("return")
-        time.sleep(1.2)
-
-        # Verify LG opened
-        cap2 = driver.capture()
-        elements2 = cap2.get("elements", [])
-        has_eval2 = any(
-            "evaluator" in el.get("label", "").lower() for el in elements2
-        )
-        has_ext2 = any(
-            "extensions" in el.get("label", "").lower()
-            for el in elements2
-            if el.get("role") == "button"
-        )
-        if has_eval2 or has_ext2:
-            print("[auto] ✓ Looking Glass opened", file=sys.stderr)
-            return True
-
-    return False
-
-
-def find_evaluate_entry(driver: CuaConnection) -> int | None:
-    """Find the Evaluator text entry in Looking Glass Extensions tab.
-
-    Returns the 1-based element index or None.
-    """
-    elements = driver.find_elements(label_contains="evaluator")
-    if elements:
-        return elements[0]["index"]
-
-    # Broader search: any text entry near "Evaluate" button
-    buttons = driver.find_elements(role="button", label_contains="evaluate")
-    text_inputs = driver.find_elements(
-        role="text", label_contains=""
-    )  # all text roles
-
-    if text_inputs and buttons:
-        # Prefer the first text entry near the evaluate button region
-        # For simplicity, just pick the most prominent text area
-        return text_inputs[0]["index"]
-
+def element_index(element: dict[str, Any]) -> int | None:
+    """Return only an index supplied by SOM; never invent one from list order."""
+    for key in ("index", "element"):
+        value = element.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
     return None
 
 
-def inject_payload(
-    driver: CuaConnection, payload: str, marker: str
-) -> tuple[bool, str]:
-    """Click Evaluator, type the full payload, press Enter.
+def element_text(element: dict[str, Any]) -> str:
+    for key in ("value", "text", "label", "name"):
+        value = element.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
-    Returns (success: bool, diagnostic: str).
-    """
-    # Navigate to Extensions tab if not already there
-    ext_btns = driver.find_elements(role="button", label_contains="extension")
-    if ext_btns:
-        idx = ext_btns[0]["index"]
-        driver.click_element(idx)
-        time.sleep(0.4)
 
-    # Find the evaluator entry field
-    entry_idx = find_evaluate_entry(driver)
-    if entry_idx is None:
-        return False, "Could not locate Evaluator input field"
+def matching_elements(
+    capture: dict[str, Any],
+    *,
+    role: str | None = None,
+    label_contains: str | None = None,
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    needle = label_contains.lower() if label_contains is not None else None
+    for element in som_elements(capture):
+        current_role = str(element.get("role", "")).lower()
+        if role is not None and current_role != role.lower():
+            continue
+        if needle is not None and needle not in element_text(element).lower():
+            continue
+        if element_index(element) is None:
+            continue
+        matches.append(element)
+    return matches
 
-    # Click the entry field
-    driver.click_element(entry_idx)
-    time.sleep(0.3)
 
-    # Type the payload
-    driver.type_text(payload)
-    time.sleep(0.5)
+def has_lookin_glass(capture: dict[str, Any]) -> bool:
+    labels = "\n".join(element_text(item).lower() for item in som_elements(capture))
+    return "evaluator" in labels or "extensions" in labels
 
-    # Verify typing worked by checking captured text starts correctly
-    cap = driver.capture()
-    last_text = cap.get("last_text", "")
-    if not last_text.startswith("const uuid"):
-        return (
-            False,
-            f"Payload typing produced unexpected result: {last_text[:80]}",
+
+def has_text_input(capture: dict[str, Any]) -> bool:
+    return any(
+        str(item.get("role", "")).lower() in TEXT_ROLES
+        for item in som_elements(capture)
+    )
+
+
+def ydotool_available() -> bool:
+    return shutil.which("ydotool") is not None
+
+
+def run_ydotool(*args: str) -> None:
+    if not ydotool_available():
+        raise RuntimeError("ydotool is not available")
+    completed = subprocess.run(
+        ["ydotool", *args],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"exit {completed.returncode}"
+        raise RuntimeError(f"ydotool failed: {detail}")
+
+
+def ydotool_alt_f2() -> None:
+    # Linux input-event codes: LEFTALT=56, F2=60.
+    run_ydotool("key", "56:1", "60:1", "60:0", "56:0")
+
+
+def ydotool_enter() -> None:
+    # KEY_ENTER=28.
+    run_ydotool("key", "28:1", "28:0")
+
+
+def ydotool_clear_field() -> None:
+    # LEFTCTRL=29, A=30, BACKSPACE=14.
+    run_ydotool("key", "29:1", "30:1", "30:0", "29:0", "14:1", "14:0")
+
+
+def ydotool_type(text: str) -> None:
+    run_ydotool("type", "--key-delay", "1", text)
+
+
+def open_once(driver: CuaConnection, use_ydotool: bool) -> bool:
+    if use_ydotool:
+        ydotool_alt_f2()
+    else:
+        driver.send_key("alt+F2")
+    time.sleep(0.6)
+
+    capture = driver.capture()
+    if has_lookin_glass(capture):
+        return True
+    if not has_text_input(capture):
+        return False
+
+    if use_ydotool:
+        ydotool_type("lg")
+        ydotool_enter()
+    else:
+        driver.type_text("lg")
+        driver.send_key("return")
+    time.sleep(1.2)
+    return has_lookin_glass(driver.capture())
+
+
+def open_lookin_glass(driver: CuaConnection) -> bool:
+    """Open Looking Glass, escalating keyboard delivery to ydotool if needed."""
+    if has_lookin_glass(driver.capture()):
+        return True
+
+    if INPUT_MODE not in {"auto", "cua", "ydotool"}:
+        raise RuntimeError(
+            "GNOME_WAYLAND_RELOAD_INPUT must be auto, cua, or ydotool"
         )
 
-    # Press Enter to execute
+    attempts: list[bool]
+    if INPUT_MODE == "cua":
+        attempts = [False]
+    elif INPUT_MODE == "ydotool":
+        attempts = [True]
+    else:
+        attempts = [False] + ([True] if ydotool_available() else [])
+
+    for use_ydotool in attempts:
+        backend = "ydotool" if use_ydotool else "cua-driver"
+        print(f"[auto] opening Looking Glass via {backend}", file=sys.stderr)
+        try:
+            if open_once(driver, use_ydotool):
+                return True
+        except RuntimeError as exc:
+            print(f"[auto] {backend} open attempt failed: {exc}", file=sys.stderr)
+        time.sleep(0.4)
+    return False
+
+
+def click_extensions_if_present(driver: CuaConnection) -> None:
+    capture = driver.capture()
+    buttons = matching_elements(capture, role="button", label_contains="extension")
+    if not buttons:
+        return
+    index = element_index(buttons[0])
+    if index is None:
+        return
+    driver.click_element(index)
+    time.sleep(0.4)
+
+
+def evaluator_entry(driver: CuaConnection) -> tuple[int, dict[str, Any]] | None:
+    """Return one evaluator-like text entry and its capture-local SOM index."""
+    capture = driver.capture()
+    elements = som_elements(capture)
+
+    explicit = [
+        item
+        for item in elements
+        if str(item.get("role", "")).lower() in TEXT_ROLES
+        and "evaluator" in element_text(item).lower()
+        and element_index(item) is not None
+    ]
+    candidates = explicit or [
+        item
+        for item in elements
+        if str(item.get("role", "")).lower() in TEXT_ROLES
+        and element_index(item) is not None
+    ]
+    if not candidates:
+        return None
+
+    item = candidates[0]
+    index = element_index(item)
+    return (index, item) if index is not None else None
+
+
+def payload_visible(driver: CuaConnection, payload: str) -> bool:
+    """Prove the evaluator contains the exact payload before submission."""
+    capture = driver.capture()
+    for item in som_elements(capture):
+        if str(item.get("role", "")).lower() not in TEXT_ROLES:
+            continue
+        for key in ("value", "text"):
+            value = item.get(key)
+            if isinstance(value, str) and value == payload:
+                return True
+    return False
+
+
+def type_payload_verified(driver: CuaConnection, payload: str) -> str:
+    entry = evaluator_entry(driver)
+    if entry is None:
+        raise RuntimeError("could not locate the Looking Glass evaluator input")
+
+    index, _ = entry
+    driver.click_element(index)
+    time.sleep(0.2)
+
+    if INPUT_MODE != "ydotool":
+        try:
+            driver.type_text(payload)
+            time.sleep(0.4)
+            if payload_visible(driver, payload):
+                return "cua-driver"
+        except RuntimeError as exc:
+            print(f"[auto] cua-driver typing failed: {exc}", file=sys.stderr)
+
+    if INPUT_MODE == "cua" or not ydotool_available():
+        raise RuntimeError("payload was not visible exactly in the evaluator")
+
+    # Typing is still pre-submit, so a verified clear + retype is safe.
+    entry = evaluator_entry(driver)
+    if entry is None:
+        raise RuntimeError("evaluator disappeared before ydotool fallback")
+    index, _ = entry
+    driver.click_element(index)
+    time.sleep(0.2)
+    ydotool_clear_field()
+    ydotool_type(payload)
+    time.sleep(0.4)
+    if not payload_visible(driver, payload):
+        raise RuntimeError("ydotool typed payload could not be verified exactly")
+    return "ydotool"
+
+
+def submit_once(driver: CuaConnection) -> str:
+    """Submit exactly once after payload verification."""
+    if INPUT_MODE != "cua" and ydotool_available():
+        ydotool_enter()
+        return "ydotool"
     driver.send_key("return")
-    time.sleep(3.0)  # Wait for async ES-module load cycle
-
-    final = driver.capture()
-    labels = final.get("labels", [])
-    detected = marker in " ".join(labels)
-
-    return True, f"markers_detected={detected}"
+    return "cua-driver"
 
 
-# ---------------------------------------------------------------------------
-# Main orchestration
-# ---------------------------------------------------------------------------
+def inject_payload(driver: CuaConnection, payload: str) -> tuple[bool, str]:
+    click_extensions_if_present(driver)
+    typed_by = type_payload_verified(driver, payload)
+    submitted_by = submit_once(driver)
+    time.sleep(0.8)
+    return True, f"typed_by={typed_by} submitted_by={submitted_by}"
 
 
 def main() -> None:
@@ -283,87 +356,72 @@ def main() -> None:
             "injected=false wrong_arg_count expected RECEIPT MARKER PAYLOAD_FILE",
             file=sys.stderr,
         )
-        sys.exit(2)
+        raise SystemExit(2)
 
-    receipt_path: str = sys.argv[1]
-    marker: str = sys.argv[2]
-    payload_path: str = sys.argv[3]
+    receipt_path = Path(sys.argv[1])
+    marker = sys.argv[2]
+    payload_path = Path(sys.argv[3])
 
-    # Validate inputs
-    if not Path(receipt_path).exists():
-        print(
-            f"injected=false receipt_not_found:{receipt_path}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if not Path(payload_path).exists():
-        print(
-            f"injected=false payload_not_found:{payload_path}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    if not receipt_path.exists():
+        print(f"injected=false receipt_not_found:{receipt_path}", file=sys.stderr)
+        raise SystemExit(2)
+    if not payload_path.exists():
+        print(f"injected=false payload_not_found:{payload_path}", file=sys.stderr)
+        raise SystemExit(2)
 
-    with open(receipt_path, encoding="utf-8") as f:
-        receipt = json.load(f)
-    token = receipt.get("token", "unknown")
-    if token == "unknown":
+    with receipt_path.open(encoding="utf-8") as handle:
+        receipt = json.load(handle)
+    token = receipt.get("token")
+    if not isinstance(token, str) or not token:
         print("injected=false missing_token_in_receipt", file=sys.stderr)
-        sys.exit(2)
+        raise SystemExit(2)
 
-    with open(payload_path, encoding="utf-8") as f:
-        payload = f.read().strip()
-
+    payload = payload_path.read_text(encoding="utf-8").strip()
     if not payload.startswith("const uuid"):
         print("injected=false invalid_payload_format", file=sys.stderr)
-        sys.exit(2)
+        raise SystemExit(2)
 
     print(
-        f"[auto] token={token} marker={marker} payload_lines={len(payload.splitlines())}",
+        f"[auto] token={token} marker={marker} payload_bytes={len(payload.encode('utf-8'))}",
         file=sys.stderr,
     )
 
-    conn: CuaConnection | None = None
+    connection: CuaConnection | None = None
     try:
-        # Connect to cua-driver
-        conn = CuaConnection(CUA_HOST, CUA_PORT)
-        print("[auto] Connected to cua-driver", file=sys.stderr)
+        connection = CuaConnection(CUA_HOST, CUA_PORT)
+        print("[auto] connected to cua-driver", file=sys.stderr)
 
-        # Step 1: Open Looking Glass
-        if not open_lookin_glass(conn):
-            print(
-                "injected=false looking_glass_open_failed",
-                file=sys.stderr,
-            )
-            sys.exit(4)
+        if not open_lookin_glass(connection):
+            print("injected=false looking_glass_open_failed", file=sys.stderr)
+            raise SystemExit(4)
 
-        # Step 2: Inject payload into Evaluator
-        success, diag = inject_payload(conn, payload, marker)
-        print(f"[auto] {diag}", file=sys.stderr)
-
-        if success:
-            print("injected=true")
-        else:
-            print(f"injected=false {diag}", file=sys.stderr)
-            sys.exit(5)
+        success, diagnostic = inject_payload(connection, payload)
+        print(f"[auto] {diagnostic}", file=sys.stderr)
+        if not success:
+            print(f"injected=false {diagnostic}", file=sys.stderr)
+            raise SystemExit(5)
+        print("injected=true")
 
     except ConnectionRefusedError:
         print(
             f"injected=false cua_connection_refused({CUA_HOST}:{CUA_PORT})",
             file=sys.stderr,
         )
-        sys.exit(6)
+        raise SystemExit(6)
     except ConnectionError as exc:
         print(f"injected=false cua_connection_error:{exc}", file=sys.stderr)
-        sys.exit(6)
+        raise SystemExit(6)
     except RuntimeError as exc:
-        print(f"injected=false cua_driver_error:{exc}", file=sys.stderr)
-        sys.exit(5)
+        print(f"injected=false input_or_cua_error:{exc}", file=sys.stderr)
+        raise SystemExit(5)
+    except SystemExit:
+        raise
     except Exception as exc:
         print(f"injected=false uncaught_error:{exc}", file=sys.stderr)
-        sys.exit(7)
+        raise SystemExit(7)
     finally:
-        if conn:
-            conn.close()
+        if connection is not None:
+            connection.close()
 
 
 if __name__ == "__main__":
