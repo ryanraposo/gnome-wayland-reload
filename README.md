@@ -156,7 +156,25 @@ That is the canonical no-logout live loop: **deploy bytes first, hot-swap
 second**.
 
 When an imported module, `metadata.json`, schema consumer, native library, or
-Shell process global changed, launch a fresh disposable Shell instead:
+Shell process global changed, point the skill directly at an extension repo to
+discover, stage, enable, and debug it in a fresh disposable Shell:
+
+```text
+/gnome-wayland-reload ~/repos/horner
+```
+
+The equivalent helper command is:
+
+```bash
+~/.agents/skills/gnome-wayland-reload/scripts/debug-extension.sh ~/repos/horner
+```
+
+The helper finds Horner's `desktop/metadata.json`, exposes that live checkout
+only to the nested session, enables its UUID there, and streams Shell logs in
+the launching terminal. Its XDG data home and dconf database are temporary;
+the host extension install and enabled-extension setting are untouched.
+
+To launch an empty devkit Shell instead:
 
 ```bash
 ~/.agents/skills/gnome-wayland-reload/scripts/dev-shell.sh
@@ -182,10 +200,24 @@ That helper owns `prepare → show → GUI injection → executed → verify` an
 `scripts/lg-autohotswap.py` when the CUA driver is available. The underlying
 receipt generator is `scripts/looking-glass-hotswap.sh`.
 
-The mechanism relies on private Shell APIs, retains old imported module objects,
-and does not refresh relative imports, metadata, schemas, native code, or other
-process-global state. Those are real boundaries; an already-active extension is
-not one of them.
+Inspect the changed artifact and selected boundary first:
+
+```bash
+~/.agents/skills/gnome-wayland-reload/scripts/reload-extension.sh --plan .
+```
+
+For an already-`ACTIVE` extension whose only Shell-side JavaScript change is
+top-level `extension.js`, run the complete deploy + guarded hot-swap:
+
+```bash
+~/.agents/skills/gnome-wayland-reload/scripts/reload-extension.sh .
+```
+
+The mechanism relies on private Shell APIs, retains old imported module
+objects, and does not refresh relative imports, metadata, schemas, native code,
+or other process-global state. The driver uses current cua-driver health/input
+tools, falls back to `ydotool` when compositor input is unavailable, and never
+reads or writes the clipboard. Prefer the nested Shell for clean-process tests.
 
 ## Preferences, schemas, and logs
 
@@ -269,15 +301,18 @@ restore any unmanaged directories backed up by the latest installation.
 | `scripts/reload-extension.sh` | Deploy source and reload an already-`ACTIVE` host extension |
 | `scripts/recycle-extension.sh` | Verified lifecycle recycle for one UUID |
 | `scripts/dev-shell.sh` | GNOME 49+ nested development Shell launcher |
+| `scripts/debug-extension.sh` | Discover, stage, enable, and debug one repo in devkit |
+| `scripts/devkit-session.sh` | Internal nested-session enable and log supervisor |
 | `scripts/diagnose.sh` | Session and prerequisite report |
 | `scripts/looking-glass-hotswap.sh` | Receipt-backed top-level hot-swap transaction generator |
 | `scripts/looking-glass-inject.sh` | Automate Looking Glass injection end-to-end |
-| `scripts/lg-autohotswap.py` | CUA-driver client that drives Looking Glass GUI |
+| `scripts/lg-autohotswap.py` | Clipboard-free current-CLI cua-driver / ydotool adapter |
 | `scripts/inspect-shell-source.sh` | Extract JavaScript from the installed GNOME Shell build |
 | `scripts/check-update.sh` | Cached, non-mutating release update check |
 | `examples/shell-functions.sh` | Optional interactive shortcuts |
 | `references/gnome-50-debugging-notes.md` | Host hot-swap caveats and GNOME 50 debugging findings |
 | `references/skill-ux-contract.md` | Reload phases, mutation boundaries, recovery, and proof |
+| `references/research-notes.md` | Validated GNOME 50, Looking Glass, Hermes, and CUA findings |
 | `assets/mascot.txt` | Reloop, the nested-Shell mechanic and his reload staff |
 | `tests/skill-ux.sh` | Constitutional and metadata regression checks |
 | `tests/run.sh` | Installer and helper regression tests |

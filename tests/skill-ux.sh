@@ -16,8 +16,12 @@ check_description() {
     case "$description" in
         '>'|'|'|'>-'|'|-') fail "$label description must be an inline scalar" ;;
     esac
-    [ "${#description}" -lt 60 ] || \
-        fail "$label description is below 60 characters"
+    [ "${#description}" -le 60 ] || \
+        fail "$label description is at most 60 characters"
+    case "$description" in
+        *.) ;;
+        *) fail "$label description ends with a period" ;;
+    esac
     pass "$label description is ${#description} characters"
 }
 
@@ -29,6 +33,14 @@ grep -q '^## Workflow Contract$' "$ROOT/SKILL.md" || \
 grep -q '^## Completion Receipt$' "$ROOT/SKILL.md" || \
     fail "skill defines completion proof"
 pass "runtime workflow and receipt are explicit"
+
+grep -q '/gnome-wayland-reload PATH' "$ROOT/SKILL.md" || \
+    fail "direct path invocation is defined"
+grep -q 'scripts/debug-extension.sh PATH' "$ROOT/SKILL.md" || \
+    fail "direct path invocation routes to devkit debugging"
+grep -q 'Do not.*host hot-swap planner' "$ROOT/SKILL.md" || \
+    fail "direct path invocation cannot mutate the host"
+pass "direct path invocation means isolated devkit debugging"
 
 for phrase in \
     'not taking effect' \
@@ -53,6 +65,8 @@ grep -q '^## Phase transitions$' "$ROOT/references/skill-ux-contract.md" || \
     fail "reload UX contract defines phases"
 grep -q 'references/skill-ux-contract.md' "$ROOT/install.sh" || \
     fail "installer ships the reload UX contract"
+grep -q 'references/research-notes.md' "$ROOT/install.sh" || \
+    fail "installer ships the research record"
 pass "reload UX contract is defined and delivered"
 
 version=$(tr -d '[:space:]' < "$ROOT/VERSION")

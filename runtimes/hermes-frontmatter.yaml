@@ -1,7 +1,7 @@
 ---
 name: gnome-wayland-reload
-description: Reload and debug GNOME Shell extensions on Wayland
-version: 2.3.3
+description: Reload and debug GNOME Shell extensions on Wayland.
+version: 3.0.0
 author: Ryan Raposo
 license: MIT
 platforms: [linux]
@@ -10,4 +10,5 @@ metadata:
     tags: [gnome, wayland, extensions, development, debugging, linux]
     category: software-development
     related_skills: [computer-use]
+    requires_toolsets: [computer_use, terminal]
 ---

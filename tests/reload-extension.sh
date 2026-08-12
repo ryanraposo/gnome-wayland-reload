@@ -16,11 +16,14 @@ grep -F 'scripts/diagnose.sh' "$ROOT/install.sh" >/dev/null
 grep -F 'chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py' "$ROOT/install.sh" >/dev/null
 [ ! -e "$ROOT/scripts/lg-autohotswap.sh" ]
 
-# CUA contract proof: SOM supplies click indices; Wayland fallback is ydotool.
-grep -F 'mode="som"' "$DRIVER" >/dev/null
+# CUA contract proof: use the supported CLI surface and a compositor fallback.
+grep -F 'health_report' "$DRIVER" >/dev/null
+grep -F 'start_session' "$DRIVER" >/dev/null
+grep -F 'type_text' "$DRIVER" >/dev/null
+grep -F 'press_key' "$DRIVER" >/dev/null
 grep -F 'ydotool' "$DRIVER" >/dev/null
-! grep -F 'i + 1' "$DRIVER" >/dev/null
-! grep -F 'last_text' "$DRIVER" >/dev/null
+grep -F 'gnome-wayland-reload-preflight' "$DRIVER" >/dev/null
+! grep -F 'socket.create_connection' "$DRIVER" >/dev/null
 python3 - "$DRIVER" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -295,6 +298,11 @@ chmod +x "$FAIL_DRIVER"
 
 cat > "$OK_DRIVER" <<'PY'
 #!/usr/bin/env python3
+import pathlib
+import sys
+
+state_arg = sys.argv.index("--submission-state") + 1
+pathlib.Path(sys.argv[state_arg]).write_text("SUBMITTED\n", encoding="utf-8")
 print("injected=true")
 PY
 chmod +x "$OK_DRIVER"
@@ -303,18 +311,24 @@ chmod +x "$OK_DRIVER"
 set +e
 GNOME_WAYLAND_RELOAD_HOTSWAP="$FAKE_HOTSWAP" \
 GNOME_WAYLAND_RELOAD_DRIVER="$FAIL_DRIVER" \
+GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$TMP/hotswap-state" \
     bash "$INJECT_SCRIPT" --no-wait --token failed-token test@example.com \
     > "$TMP/inject-fail.out" 2> "$TMP/inject-fail.err"
 rc=$?
 set -e
-[ "$rc" -eq 3 ]
+if [ "$rc" -ne 2 ]; then
+  cat "$TMP/inject-fail.err" >&2
+  echo "expected pre-submit driver failure to exit 2, got $rc" >&2
+  exit 1
+fi
 ! grep -q '^executed ' "$HOTLOG"
-! grep -q '^abort ' "$HOTLOG"
-grep -F 'Do not submit the payload again' "$TMP/inject-fail.err" >/dev/null
+grep -q '^abort ' "$HOTLOG"
+grep -F 'payload was not submitted; receipt aborted safely' "$TMP/inject-fail.err" >/dev/null
 
 : > "$HOTLOG"
 GNOME_WAYLAND_RELOAD_HOTSWAP="$FAKE_HOTSWAP" \
 GNOME_WAYLAND_RELOAD_DRIVER="$OK_DRIVER" \
+GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$TMP/hotswap-state" \
     bash "$INJECT_SCRIPT" --no-wait --token success-token test@example.com \
     > "$TMP/inject-ok.out" 2> "$TMP/inject-ok.err"
 grep -q '^executed ' "$HOTLOG"

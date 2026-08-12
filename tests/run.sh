@@ -15,6 +15,8 @@ assert() { local name="$1"; shift; if "$@"; then pass "$name"; else fail "$name"
 for script in "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/scripts/"*.sh "$ROOT/tests/run.sh"; do
     assert "shell syntax: ${script#"$ROOT/"}" bash -n "$script"
 done
+assert "python syntax: scripts/lg-autohotswap.py" \
+    python3 -m py_compile "$ROOT/scripts/lg-autohotswap.py"
 
 validator="${SKILL_VALIDATOR:-$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py}"
 if [ -f "$validator" ]; then
@@ -39,8 +41,9 @@ assert "skill metadata permits implicit invocation" \
 assert "OpenAI skill frontmatter stays minimal" sh -c \
     'sed -n "2,/^---$/p" "$1" | grep -Eq "^(name|description):" && ! sed -n "2,/^---$/p" "$1" | grep -Eq "^(version|author|license|platforms|metadata):"' \
     sh "$ROOT/SKILL.md"
-assert "Hermes payload keeps compact inline triggering" \
-    grep -q '^description: Reload and debug GNOME Shell extensions on Wayland$' "$ROOT/runtimes/hermes-frontmatter.yaml"
+assert "Hermes description is punctuated and routable" sh -c \
+    'd=$(sed -n "s/^description:[[:space:]]*//p" "$1" | head -n1); test "${d%?}" != "$d" && test "${d#${d%?}}" = "." && test "${#d}" -le 60' \
+    sh "$ROOT/runtimes/hermes-frontmatter.yaml"
 assert "Hermes payload carries versioned platform metadata" sh -c \
     'grep -q "^version: " "$1" && grep -q "^platforms: \[linux\]" "$1" && grep -q "^  hermes:$" "$1"' \
     sh "$ROOT/runtimes/hermes-frontmatter.yaml"
@@ -131,15 +134,24 @@ assert "Agent install keeps OpenAI UI metadata" \
 assert "Hermes install omits OpenAI-only UI metadata" \
     test ! -e "$hermes_home/skills/gnome-wayland-reload/agents/openai.yaml"
 assert "Hermes install carries Hermes-native metadata" \
-    grep -q '^version: 2.3.3$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
+    grep -q '^version: 3.0.0$' "$hermes_home/skills/gnome-wayland-reload/SKILL.md"
 assert "local install includes GNOME 50 debugging reference" \
     test -f "$agents_home/skills/gnome-wayland-reload/references/gnome-50-debugging-notes.md"
 assert "local install includes the Reloop mascot" \
     test -f "$agents_home/skills/gnome-wayland-reload/assets/mascot.txt"
 assert "installed copy has managed marker" test -f "$agents_home/skills/gnome-wayland-reload/.gnome-wayland-reload-managed"
 assert "installed helper remains executable" test -x "$agents_home/skills/gnome-wayland-reload/scripts/dev-shell.sh"
+assert "installed repo debugger remains executable" \
+    test -x "$agents_home/skills/gnome-wayland-reload/scripts/debug-extension.sh"
 assert "installed hot-swap helper remains executable" \
     test -x "$agents_home/skills/gnome-wayland-reload/scripts/looking-glass-hotswap.sh"
+assert "installed planner remains executable" \
+    test -x "$agents_home/skills/gnome-wayland-reload/scripts/reload-extension.sh"
+assert "installed GUI adapter remains executable" \
+    test -x "$agents_home/skills/gnome-wayland-reload/scripts/lg-autohotswap.py"
+assert "installed adapter is clipboard-free" sh -c \
+    '! grep -Eq "wl-copy|wl-paste|clipboard_(read|write)" "$1"' \
+    sh "$agents_home/skills/gnome-wayland-reload/scripts/lg-autohotswap.py"
 assert "installed update helper remains executable" \
     test -x "$agents_home/skills/gnome-wayland-reload/scripts/check-update.sh"
 
@@ -151,13 +163,13 @@ update_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh" --force)
 assert "update checker reports a newer published version" \
-    grep -q '2.3.3 -> 9.9.9' <<< "$update_out"
+    grep -q '3.0.0 -> 9.9.9' <<< "$update_out"
 printf '0.0.1\n' > "$update_remote/VERSION"
 cached_out=$(GNOME_WAYLAND_RELOAD_BASE_URL="file://$update_remote" \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$update_state" \
     "$ROOT/scripts/check-update.sh")
 assert "update checker caches the successful lookup" \
-    grep -q '2.3.3 -> 9.9.9' <<< "$cached_out"
+    grep -q '3.0.0 -> 9.9.9' <<< "$cached_out"
 offline_out=$(GNOME_WAYLAND_RELOAD_BASE_URL='file:///does-not-exist' \
     GNOME_WAYLAND_RELOAD_UPDATE_STATE_HOME="$TEST_TMP/offline-state" \
     "$ROOT/scripts/check-update.sh" --force --quiet)
@@ -256,6 +268,9 @@ assert "skill warns that undefined evaluator output is inconclusive" sh -c \
 assert "skill guards against animation sampling aliases" sh -c \
     'grep -q "one loop period" "$1" && grep -q "can look identical" "$1"' \
     sh "$ROOT/SKILL.md"
+assert "CUA adapter regression suite" "$ROOT/tests/cua-adapter.sh"
+assert "reload planner route matrix" "$ROOT/tests/reload-planner.sh"
+assert "devkit extension integration" "$ROOT/tests/devkit-extension.sh"
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
