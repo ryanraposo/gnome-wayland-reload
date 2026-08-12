@@ -155,24 +155,28 @@ For top-level `extension.js` work on an already-active extension:
 That is the canonical no-logout live loop: **deploy bytes first, hot-swap
 second**.
 
-When an imported module, `metadata.json`, schema consumer, native library, or
-Shell process global changed, point the skill directly at an extension repo to
-discover, stage, enable, and debug it in a fresh disposable Shell:
+For a manual extension testing session, invoke the skill from a typical
+extension repo with no argument, or give it another repo path:
 
 ```text
-/gnome-wayland-reload ~/repos/horner
+cd /path/to/extension-repo
+/gnome-wayland-reload
+/gnome-wayland-reload /path/to/another-extension-repo
 ```
 
-The equivalent helper command is:
+The equivalent helper commands are:
 
 ```bash
-~/.agents/skills/gnome-wayland-reload/scripts/debug-extension.sh ~/repos/horner
+~/.agents/skills/gnome-wayland-reload/scripts/debug-extension.sh
+~/.agents/skills/gnome-wayland-reload/scripts/debug-extension.sh /path/to/extension-repo
 ```
 
-The helper finds Horner's `desktop/metadata.json`, exposes that live checkout
-only to the nested session, enables its UUID there, and streams Shell logs in
-the launching terminal. Its XDG data home and dconf database are temporary;
-the host extension install and enabled-extension setting are untouched.
+Both forms do only that devkit workflow. The helper finds exactly one
+`metadata.json`, exposes the live checkout only to the nested session, enables
+its UUID there, and streams Shell logs in the launching terminal. It remains
+attached until you close the devkit Shell. Its XDG data home and dconf database
+are temporary; the host extension install and enabled-extension setting are
+untouched.
 
 To launch an empty devkit Shell instead:
 

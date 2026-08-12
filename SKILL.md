@@ -32,18 +32,30 @@ the driver uses `ydotool`. It never reads or writes the clipboard.
 
 ## How to Run
 
-### Direct path invocation
+### Direct invocation
 
-When invoked as `/gnome-wayland-reload PATH`, treat `PATH` as an extension
-directory or repository and immediately run:
+When invoked exactly as `/gnome-wayland-reload`, preserve the invocation
+working directory and immediately run the bundled helper with no argument:
+
+```bash
+scripts/debug-extension.sh
+```
+
+When invoked as `/gnome-wayland-reload PATH`, immediately run the same bundled
+helper with `PATH`:
 
 ```bash
 scripts/debug-extension.sh PATH
 ```
 
-This direct form always means “debug this extension in a fresh devkit Shell.”
-Discover a single nested `metadata.json`, stage the checkout only in the
-nested session, enable its UUID there, and stream its Shell diagnostics. Do not route a direct path invocation to the host hot-swap planner, and do not install or enable the extension in the host session.
+The no-argument form uses the current working directory. `PATH` may be an
+extension directory or repository. These direct forms do only this: discover
+a single nested `metadata.json`, stage the checkout only in a fresh nested
+devkit session, enable its UUID there, and stream its Shell diagnostics. Treat
+the command as an attached manual testing session and wait until the user
+closes the devkit Shell. Do not diagnose, plan, host hot-swap, install or enable
+the extension in the host session, drive the devkit window, or close it
+automatically.
 
 From an extension checkout, use the planner as the primary entry point:
 

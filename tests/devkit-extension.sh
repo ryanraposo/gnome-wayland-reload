@@ -57,24 +57,41 @@ printf '%s\n' 'install ok installed'
 SH
 chmod +x "$mock_bin/"*
 
-PATH="$mock_bin:/usr/bin:/bin" \
-XDG_CONFIG_HOME="$host_config" XDG_RUNTIME_DIR="$runtime" \
-HOST_CONFIG_HOME="$host_config" DEVKIT_DBUS_LOG="$TMP/dbus.log" \
-DEVKIT_SHELL_LOG="$TMP/shell.log" DEVKIT_EXTENSION_LOG="$TMP/extensions.log" \
-    "$ROOT/scripts/debug-extension.sh" "$repo" >"$TMP/out" 2>"$TMP/err"
+run_debug() {
+    local label="$1"
+    shift
+    PATH="$mock_bin:/usr/bin:/bin" \
+    XDG_CONFIG_HOME="$host_config" XDG_RUNTIME_DIR="$runtime" \
+    HOST_CONFIG_HOME="$host_config" DEVKIT_DBUS_LOG="$TMP/dbus-$label.log" \
+    DEVKIT_SHELL_LOG="$TMP/shell-$label.log" DEVKIT_EXTENSION_LOG="$TMP/extensions-$label.log" \
+        "$ROOT/scripts/debug-extension.sh" "$@" >"$TMP/out-$label" 2>"$TMP/err-$label"
+}
 
-grep -qx "extension=$repo/desktop" "$TMP/shell.log"
-grep -qx "config=$host_config/horner" "$TMP/shell.log"
-grep -qx 'dconf=isolated' "$TMP/shell.log"
-grep -q "daemon_config=$runtime/gnome-wayland-reload/devkit\." "$TMP/dbus.log"
-grep -q 'args=--devkit --wayland --debug-control' "$TMP/shell.log"
-grep -qx 'enable horner@ryanraposo.github.io' "$TMP/extensions.log"
-grep -q 'uuid=horner@ryanraposo.github.io shell=50' "$TMP/err"
-grep -q 'state=ACTIVE' "$TMP/err"
+assert_debug() {
+    local label="$1"
+    grep -qx "extension=$repo/desktop" "$TMP/shell-$label.log"
+    grep -qx "config=$host_config/horner" "$TMP/shell-$label.log"
+    grep -qx 'dconf=isolated' "$TMP/shell-$label.log"
+    grep -q "daemon_config=$runtime/gnome-wayland-reload/devkit\." "$TMP/dbus-$label.log"
+    grep -q 'args=--devkit --wayland --debug-control' "$TMP/shell-$label.log"
+    grep -qx 'enable horner@ryanraposo.github.io' "$TMP/extensions-$label.log"
+    grep -q 'uuid=horner@ryanraposo.github.io shell=50' "$TMP/err-$label"
+    grep -q 'state=ACTIVE' "$TMP/err-$label"
+}
+
+run_debug path "$repo"
+assert_debug path
+(
+    cd "$repo"
+    run_debug cwd
+)
+assert_debug cwd
+
 grep -qx 'host-dconf-sentinel' "$host_config/dconf/user"
 test -z "$(find "$runtime/gnome-wayland-reload" -mindepth 1 -maxdepth 1 -print -quit)"
 
 printf 'ok - repo root discovers nested extension directory\n'
+printf 'ok - omitted source defaults to the current repo\n'
 printf 'ok - checkout is staged only in the nested XDG data home\n'
 printf 'ok - ordinary Horner config is shared while dconf is isolated\n'
 printf 'ok - extension is enabled and verified ACTIVE on nested session bus\n'

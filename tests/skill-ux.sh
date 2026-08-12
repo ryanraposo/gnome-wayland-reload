@@ -34,13 +34,21 @@ grep -q '^## Completion Receipt$' "$ROOT/SKILL.md" || \
     fail "skill defines completion proof"
 pass "runtime workflow and receipt are explicit"
 
+grep -q 'exactly as `/gnome-wayland-reload`' "$ROOT/SKILL.md" || \
+    fail "bare invocation is defined"
+grep -q 'uses the current working directory' "$ROOT/SKILL.md" || \
+    fail "bare invocation targets the current repo"
 grep -q '/gnome-wayland-reload PATH' "$ROOT/SKILL.md" || \
     fail "direct path invocation is defined"
 grep -q 'scripts/debug-extension.sh PATH' "$ROOT/SKILL.md" || \
     fail "direct path invocation routes to devkit debugging"
-grep -q 'Do not.*host hot-swap planner' "$ROOT/SKILL.md" || \
+grep -q 'attached manual testing session' "$ROOT/SKILL.md" || \
+    fail "direct invocation remains attached for manual testing"
+grep -q 'closes the devkit Shell' "$ROOT/SKILL.md" || \
+    fail "the user owns devkit session termination"
+grep -q 'Do not diagnose, plan, host hot-swap' "$ROOT/SKILL.md" || \
     fail "direct path invocation cannot mutate the host"
-pass "direct path invocation means isolated devkit debugging"
+pass "bare and path invocations mean attached devkit debugging"
 
 for phrase in \
     'not taking effect' \

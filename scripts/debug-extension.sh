@@ -6,11 +6,13 @@ SESSION_RUNNER="$SCRIPT_DIR/devkit-session.sh"
 
 usage() {
     cat <<'EOF'
-Usage: debug-extension.sh SOURCE_OR_REPO [-- GNOME_SHELL_ARGUMENT...]
+Usage: debug-extension.sh [SOURCE_OR_REPO] [-- GNOME_SHELL_ARGUMENT...]
 
 Discover one GNOME Shell extension below SOURCE_OR_REPO, expose that checkout
 to an isolated nested GNOME devkit session, enable it there, and stream Shell
 diagnostics until the devkit window closes.
+
+SOURCE_OR_REPO defaults to the current working directory.
 
 The host Shell, host extension installation, and host enabled-extension setting
 are not changed. Ordinary files under the user's config home remain visible;
@@ -23,11 +25,13 @@ require_command() { command -v "$1" >/dev/null 2>&1 || fail "required command no
 
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
-    '') usage >&2; exit 2 ;;
 esac
 
-source_arg="$1"
-shift
+source_arg="."
+if [ "$#" -gt 0 ] && [ "$1" != -- ]; then
+    source_arg="$1"
+    shift
+fi
 shell_args=()
 if [ "$#" -gt 0 ]; then
     [ "$1" = -- ] || fail "GNOME Shell arguments must follow --"

@@ -47,7 +47,7 @@ Other helpers are available directly from a checkout:
 
 ```bash
 ./scripts/diagnose.sh
-./scripts/debug-extension.sh /path/to/extension-or-repo
+./scripts/debug-extension.sh [/path/to/extension-or-repo]
 ./scripts/reload-extension.sh --plan /path/to/extension-or-repo
 ./scripts/reload-extension.sh /path/to/extension-or-repo
 ./scripts/recycle-extension.sh UUID
