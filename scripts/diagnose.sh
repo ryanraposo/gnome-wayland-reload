@@ -37,6 +37,9 @@ report gnome-shell "$shell_version"
 report gnome-extensions "$(command -v gnome-extensions 2>/dev/null || printf 'not found')"
 report dbus-run-session "$(command -v dbus-run-session 2>/dev/null || printf 'not found')"
 report glib-compile-schemas "$(command -v glib-compile-schemas 2>/dev/null || printf 'not found')"
+report cua-driver "$(command -v cua-driver 2>/dev/null || printf 'not found (host hot-swap automation unavailable)')"
+report ydotool "$(command -v ydotool 2>/dev/null || printf 'not found (GNOME Wayland fallback unavailable)')"
+report clipboard 'never used by this workflow'
 
 if command -v dpkg-query >/dev/null 2>&1 &&
    dpkg-query -W -f='${Status}' mutter-dev-bin 2>/dev/null | grep -q 'install ok installed'; then

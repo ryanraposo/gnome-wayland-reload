@@ -3,29 +3,30 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOTSWAP="${GNOME_WAYLAND_RELOAD_HOTSWAP:-$SCRIPT_DIR/looking-glass-hotswap.sh}"
-DRIVER_SCRIPT="${GNOME_WAYLAND_RELOAD_DRIVER:-$SCRIPT_DIR/lg-autohotswap.py}"
+DRIVER="${GNOME_WAYLAND_RELOAD_DRIVER:-$SCRIPT_DIR/lg-autohotswap.py}"
+STATE_ROOT="${GNOME_WAYLAND_RELOAD_HOTSWAP_HOME:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gnome-wayland-reload/hotswap}"
 
 usage() {
     cat <<'USAGE'
 Usage:
-  looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+  looking-glass-inject.sh [--no-wait] [--timeout SECONDS] [--token TOKEN] UUID
+  looking-glass-inject.sh --verify-receipt RECEIPT
 
-Automate the receipt-backed hot-swap payload through GNOME Looking Glass.
-
-The injector records EXECUTED only after the GUI driver explicitly reports
-injected=true. A failed or ambiguous driver run is never silently promoted to
-EXECUTED and must never be retried by blindly submitting the payload again.
+Prepare one immutable payload, submit it exactly once through GNOME Looking
+Glass, record the execution boundary, and verify the journal-backed receipt.
 
 Options:
-  --no-wait   Skip journal polling; report verification status immediately.
-  --token     Supply a deterministic token (for testing or audit trails).
-  --help      Show this usage text.
+  --no-wait                 Verify once without polling.
+  --timeout SECONDS         Journal polling budget (default: 45).
+  --token TOKEN             Deterministic token for tests or audit trails.
+  --verify-receipt RECEIPT  Re-check an existing EXECUTED/INCONCLUSIVE receipt.
+  --help                    Show this usage text.
 
 Exit codes:
-  0  Injected and verified ok=true
-  1  Injection succeeded but proof/verification failed
-  2  Usage, dependency, or pre-injection integrity error
-  3  Injection or verification outcome is inconclusive; inspect/re-check, do not re-inject
+  0  Verified.
+  1  Exact invocation ran and reported failure.
+  2  Usage, dependency, or integrity failure before submission.
+  3  Submission may have run, but proof is still inconclusive.
 USAGE
 }
 
@@ -34,187 +35,134 @@ require_command() { command -v "$1" >/dev/null 2>&1 || fail "required command no
 
 prepare_token="${HOTSWAP_TOKEN:-}"
 wait_mode=true
+timeout_seconds=45
+verify_receipt=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --no-wait)
-            wait_mode=false
-            shift
+        --no-wait) wait_mode=false; shift ;;
+        --timeout)
+            [ "$#" -ge 2 ] || fail "--timeout requires a value"
+            timeout_seconds="$2"
+            case "$timeout_seconds" in
+                ''|*[!0-9]*) fail "--timeout must be a non-negative integer" ;;
+            esac
+            shift 2
             ;;
         --token)
             [ "$#" -ge 2 ] || fail "--token requires a value"
             prepare_token="$2"
             shift 2
             ;;
-        --help|-h)
-            usage
-            exit 0
+        --verify-receipt)
+            [ "$#" -ge 2 ] || fail "--verify-receipt requires a path"
+            verify_receipt="$2"
+            shift 2
             ;;
-        --*)
-            fail "unknown option: $1"
-            ;;
-        *)
-            break
-            ;;
+        --help|-h) usage; exit 0 ;;
+        --*) fail "unknown option: $1" ;;
+        *) break ;;
     esac
 done
 
+require_command python3
+[ -x "$HOTSWAP" ] || fail "hot-swap helper not executable: $HOTSWAP"
+
+if [ -n "$verify_receipt" ]; then
+    [ "$#" -eq 0 ] || fail "--verify-receipt does not accept a UUID"
+    exec "$HOTSWAP" verify "$verify_receipt"
+fi
+
 [ "$#" -eq 1 ] || { usage >&2; exit 2; }
 UUID="$1"
-require_command python3
-[ -x "$HOTSWAP" ] || fail "hot-swap helper not found or not executable: $HOTSWAP"
+[ -x "$DRIVER" ] || fail "Looking Glass driver not executable: $DRIVER"
+
+mkdir -p "$STATE_ROOT"
+chmod 700 "$STATE_ROOT"
+work_dir="$(mktemp -d "$STATE_ROOT/inject.XXXXXX")"
+chmod 700 "$work_dir"
+payload_file="$work_dir/payload.js"
+submission_state="$work_dir/submission.state"
+trap 'rm -rf -- "$work_dir"' EXIT
 
 prepare_args=(prepare)
-if [ -n "$prepare_token" ]; then
-    prepare_args+=(--token "$prepare_token")
-fi
+[ -z "$prepare_token" ] || prepare_args+=(--token "$prepare_token")
 prepare_args+=("$UUID")
 
-echo "[inject] preparing hot-swap payload for extension $UUID ..." >&2
-STATE_ROOT="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gnome-wayland-reload/hotswap"
-PREPARED_JSON="$(
-    GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-        "$HOTSWAP" "${prepare_args[@]}"
-)"
-
-RECEIPT="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' "$PREPARED_JSON")"
-TOKEN="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["token"])' "$PREPARED_JSON")"
-MARKER="[gnome-wayland-reload:${TOKEN}]"
-PAYLOAD="$(
-    GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-        "$HOTSWAP" show "$RECEIPT"
-)" || {
-    echo "[inject] SHOW FAILED — possible tamper or invalid receipt" >&2
-    exit 2
-}
-
-echo "[inject] receipt=$RECEIPT token=$TOKEN marker=$MARKER" >&2
-
-PAYLOAD_FILE="$(mktemp /tmp/lgi-payload-XXXXXX.js)"
-printf '%s' "$PAYLOAD" > "$PAYLOAD_FILE"
-cleanup() {
-    rm -f "$PAYLOAD_FILE"
-}
-trap cleanup EXIT
-
-abort_prepared() {
-    GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-        "$HOTSWAP" abort "$RECEIPT" >/dev/null 2>&1 || true
-}
-
-if [ ! -x "$DRIVER_SCRIPT" ]; then
-    echo "[inject] driver unavailable before any GUI submission: $DRIVER_SCRIPT" >&2
-    abort_prepared
-    exit 2
-fi
-
-echo "[inject] opening Looking Glass and submitting the prepared payload once ..." >&2
-
-set +e
-DRIVER_OUT="$(python3 "$DRIVER_SCRIPT" "$RECEIPT" "$MARKER" "$PAYLOAD_FILE" 2>&1)"
-DRIVER_RC=$?
-set -e
-
-printf '%s\n' "$DRIVER_OUT" >&2
-DR_INJECTED="$(printf '%s\n' "$DRIVER_OUT" | grep -E '^injected=(true|false)([[:space:]]|$)' | tail -n1 || true)"
-
-if [ "$DRIVER_RC" -ne 0 ] || [ "$DR_INJECTED" != "injected=true" ]; then
-    echo "[inject] INCONCLUSIVE — the GUI driver did not prove a one-shot submission." >&2
-    echo "[inject] Do not submit the payload again merely because the driver failed." >&2
-    echo "[inject] Inspect the exact marker before deciding whether execution happened:" >&2
-    printf '[inject]   journalctl -b -o cat /usr/bin/gnome-shell | grep -- %q\n' "$MARKER" >&2
-    echo "[inject] receipt=$RECEIPT remains PREPARED because execution was not proven." >&2
-    exit 3
-fi
-
-echo "[inject] recording the proven one-shot submission ..." >&2
-if ! GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-    "$HOTSWAP" executed "$RECEIPT" >/dev/null; then
-    echo "[inject] INCONCLUSIVE — payload submission was proven but the receipt could not advance." >&2
-    echo "[inject] Never re-inject this payload. Preserve the receipt and inspect the exact marker." >&2
-    echo "[inject] receipt=$RECEIPT marker=$MARKER" >&2
-    exit 3
-fi
-
-PREPARED_AT="$(python3 - "$RECEIPT" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    print(json.load(handle)["prepared_at"])
-PY
-)"
-
-if [ "$wait_mode" = true ]; then
-    echo "[inject] polling Shell journal for proof marker $MARKER ..." >&2
-    MAX_WAIT="${GNOME_WAYLAND_RELOAD_MAX_WAIT:-45}"
-    WAITED=0
-
-    while [ "$WAITED" -lt "$MAX_WAIT" ]; do
-        PROOF_LINE="$(
-            journalctl --since "$PREPARED_AT" -b -o cat /usr/bin/gnome-shell 2>/dev/null \
-                | grep -- "$MARKER" | tail -n1
-        )" || true
-
-        if [ -n "$PROOF_LINE" ]; then
-            VERIFY_RC=0
-            GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-                "$HOTSWAP" verify "$RECEIPT" >/dev/null 2>&1 || VERIFY_RC=$?
-
-            case "$VERIFY_RC" in
-                0)
-                    echo "[inject] VERIFIED — extension hot-swap completed successfully" >&2
-                    python3 -m json.tool "$RECEIPT" 2>/dev/null || cat "$RECEIPT"
-                    exit 0
-                    ;;
-                1)
-                    echo "[inject] FAILED — the exact invocation ran but replacement failed" >&2
-                    cat "$RECEIPT" >&2
-                    exit 1
-                    ;;
-                3)
-                    sleep 2
-                    WAITED=$((WAITED + 2))
-                    continue
-                    ;;
-                *)
-                    echo "[inject] verification helper returned unexpected status $VERIFY_RC" >&2
-                    exit 2
-                    ;;
-            esac
-        fi
-
-        sleep 1
-        WAITED=$((WAITED + 1))
-    done
-
-    echo "[inject] timeout after ${MAX_WAIT}s; running final verification against the same receipt ..." >&2
-fi
-
-FINAL_RC=0
+printf '[inject] preparing immutable payload for %s ...\n' "$UUID" >&2
+prepared_json="$(GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
+    "$HOTSWAP" "${prepare_args[@]}")"
+receipt="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["receipt_file"])' "$prepared_json")"
+token="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["token"])' "$prepared_json")"
+marker="[gnome-wayland-reload:${token}]"
 GNOME_WAYLAND_RELOAD_HOTSWAP_HOME="$STATE_ROOT" \
-    "$HOTSWAP" verify "$RECEIPT" >/dev/null 2>&1 || FINAL_RC=$?
+    "$HOTSWAP" show "$receipt" > "$payload_file"
+chmod 600 "$payload_file"
 
-case "$FINAL_RC" in
-    0)
-        echo "[inject] VERIFIED — extension hot-swap completed" >&2
-        python3 -m json.tool "$RECEIPT" 2>/dev/null || cat "$RECEIPT"
-        exit 0
-        ;;
-    1)
-        echo "[inject] FAILED — replacement or rollback issue detected" >&2
-        cat "$RECEIPT" >&2
-        exit 1
-        ;;
-    3)
-        echo "[inject] INCONCLUSIVE — exact proof is not yet confirmed." >&2
-        echo "[inject] Re-check this same receipt; do not create or inject a new transaction:" >&2
-        printf '[inject]   %q verify %q\n' "$HOTSWAP" "$RECEIPT" >&2
-        printf '[inject]   journalctl -b -o cat /usr/bin/gnome-shell | grep -- %q\n' "$MARKER" >&2
-        cat "$RECEIPT" >&2
-        exit 3
+printf '[inject] receipt=%s token=%s\n' "$receipt" "$token" >&2
+driver_rc=0
+driver_out="$("$DRIVER" --submission-state "$submission_state" \
+    "$receipt" "$marker" "$payload_file" 2>&1)" || driver_rc=$?
+printf '%s\n' "$driver_out" >&2
+
+submission=""
+[ ! -f "$submission_state" ] || submission="$(tr -d '[:space:]' < "$submission_state")"
+case "$submission" in
+    SUBMITTING|SUBMITTED)
+        printf '[inject] submission boundary crossed (%s); preserving one-shot receipt\n' \
+            "$submission" >&2
+        "$HOTSWAP" executed "$receipt" >/dev/null
         ;;
     *)
-        echo "[inject] verification helper returned unexpected status $FINAL_RC" >&2
-        exit 2
+        "$HOTSWAP" abort "$receipt" >/dev/null 2>&1 || true
+        if [ "$driver_rc" -ne 0 ]; then
+            printf '[inject] payload was not submitted; receipt aborted safely\n' >&2
+            exit 2
+        fi
+        fail "driver returned success without a durable submission witness"
         ;;
 esac
+
+if [ "$driver_rc" -ne 0 ]; then
+    printf '[inject] driver failed after submission; verify this receipt and never repeat the payload\n' >&2
+fi
+
+verify_once() {
+    local rc=0
+    "$HOTSWAP" verify "$receipt" >/dev/null || rc=$?
+    return "$rc"
+}
+
+verify_rc=3
+if $wait_mode; then
+    waited=0
+    while [ "$waited" -lt "$timeout_seconds" ]; do
+        verify_rc=0
+        verify_once || verify_rc=$?
+        case "$verify_rc" in
+            0|1) break ;;
+            3) sleep 1; waited=$((waited + 1)) ;;
+            *) exit "$verify_rc" ;;
+        esac
+    done
+else
+    verify_rc=0
+    verify_once || verify_rc=$?
+fi
+
+case "$verify_rc" in
+    0)
+        printf '[inject] VERIFIED — exact token proof and ACTIVE state confirmed\n' >&2
+        python3 -m json.tool "$receipt"
+        ;;
+    1)
+        printf '[inject] FAILED — inspect rollback; do not repeat the payload\n' >&2
+        python3 -m json.tool "$receipt" >&2 || true
+        ;;
+    3)
+        printf '[inject] INCONCLUSIVE — re-check this same receipt; do not execute again:\n' >&2
+        printf '  %s --verify-receipt %q\n' "$0" "$receipt" >&2
+        python3 -m json.tool "$receipt" >&2 || true
+        ;;
+esac
+exit "$verify_rc"

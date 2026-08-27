@@ -1,9 +1,21 @@
 ---
 name: gnome-wayland-reload
-description: Reload and debug GNOME Shell extensions on Wayland
+description: Reload and debug GNOME Shell extensions on Wayland.
 ---
 
-# Reload GNOME Extensions on Wayland
+# GNOME Wayland Reload Skill
+
+Reload GNOME Shell extensions at the smallest boundary that can actually load
+the changed artifact. This skill does not automate unrelated desktop apps.
+
+## When to Use
+
+Use this skill when edited extension code is not taking effect, disable/enable did not load new code,
+a cache-busted host hot-swap is under consideration, or
+the user asks whether gnome-shell --replace, logout/login, or another restart
+is required. Do not use it for ordinary GNOME app automation.
+
+## Prerequisites
 
 At the start of the first reload or diagnosis in a session, run
 `scripts/check-update.sh --quiet`. Continue normally if the network is offline.
@@ -14,7 +26,64 @@ Treat the host GNOME Shell as the Wayland compositor. It cannot be restarted
 in-place while preserving the graphical session. Prefer the smallest refresh
 that can actually load the changed artifact.
 
-Use this skill when edited extension code is not taking effect, disable/enable did not load new code, a cache-busted host hot-swap is under consideration, or the user asks whether gnome-shell --replace, logout/login, or another restart is required. Do not use it for ordinary GNOME app automation.
+Run `scripts/diagnose.sh` before mutation. Host hot-swap additionally requires
+cua-driver; on GNOME Wayland where its native compositor input is unavailable,
+the driver uses `ydotool`. It never reads or writes the clipboard.
+
+## How to Run
+
+### Direct invocation
+
+When invoked exactly as `/gnome-wayland-reload`, preserve the invocation
+working directory and immediately run the bundled helper with no argument:
+
+```bash
+scripts/debug-extension.sh
+```
+
+When invoked as `/gnome-wayland-reload dev`, toggle into dev mode and immediately run the fresh nested Shell for extension development:
+
+```bash
+scripts/dev-shell.sh
+```
+
+When invoked as `/gnome-wayland-reload PATH`, immediately run the same bundled
+helper with `PATH`:
+
+```bash
+scripts/debug-extension.sh PATH
+```
+
+The no-argument form uses the current working directory. `PATH` may be an
+extension directory or repository. The `dev` form launches the dev mutter shell (`gnome-shell --devkit --wayland`) as an empty, disposable desktop for developing extensions. These direct forms do only this: discover
+a single nested `metadata.json`, stage the checkout only in a fresh nested
+devkit session, enable its UUID there, and stream its Shell diagnostics. Treat
+the command as an attached manual testing session and wait until the user
+closes the devkit Shell. Do not diagnose, plan, host hot-swap, install or enable
+the extension in the host session, drive the devkit window, or close it
+automatically.
+
+From an extension checkout, use the planner as the primary entry point:
+
+```bash
+scripts/reload-extension.sh --plan .
+scripts/reload-extension.sh .
+```
+
+The first command is read-only. The second deploys and performs only the route
+reported by the planner.
+
+## Quick Reference
+
+| Intent | Command |
+|---|---|
+| Debug a repo in devkit | `scripts/debug-extension.sh SOURCE_OR_REPO` |
+| Dev mode (mutter dev shell) | `scripts/dev-shell.sh` (`/gnome-wayland-reload dev`) |
+| Inspect and route | `scripts/reload-extension.sh --plan SOURCE` |
+| Deploy and refresh | `scripts/reload-extension.sh SOURCE` |
+| Lifecycle cleanup | `scripts/recycle-extension.sh UUID` |
+| Fresh process | `scripts/dev-shell.sh` |
+| Re-check one-shot proof | `scripts/looking-glass-inject.sh --verify-receipt RECEIPT` |
 
 ## Workflow Contract
 
@@ -51,7 +120,9 @@ authorization. Never equate a successful command with a loaded module.
 Read `references/skill-ux-contract.md` when choosing a mutation boundary,
 recovering from a partial reload, or deciding whether host logout is justified.
 
-## Decide First
+## Procedure
+
+### Decide First
 
 | Change or goal | Correct refresh |
 |---|---|
@@ -59,7 +130,7 @@ recovering from a partial reload, or deciding whether host logout is justified.
 | GSettings value | Usually live; soft-cycle only if the extension does not react |
 | `stylesheet.css` | Soft-cycle first |
 | `prefs.js` or preference-only imports | Close and reopen preferences |
-| Already-`ACTIVE` host extension; top-level `extension.js` changed | Deploy + Looking Glass live reload with `scripts/reload-extension.sh` |
+| Already-`ACTIVE` host extension; only top-level `extension.js` changed | Deploy + guarded Looking Glass hot-swap |
 | Shell-side imported `.js` module changed | Fresh nested Shell; otherwise host logout/login |
 | `metadata.json` | Fresh nested Shell; otherwise host logout/login |
 | GSettings schema XML | Compile schemas, then restart the process that consumes them |
@@ -84,21 +155,14 @@ when the edited runtime change is confined to top-level `extension.js` and
 cleanup is reliable. Do not silently substitute a soft cycle: it only reruns
 lifecycle methods and cannot load fresh Shell-side JavaScript.
 
-The live path is an ordered pair: deploy bytes first, hot-swap second. Prefer
-the bundled wrapper when source is available:
+Before any host hot-swap, run `scripts/reload-extension.sh SOURCE_OR_REPO`.
+It discovers one extension, compares source and installed manifests, refuses
+the wrong refresh boundary, deploys source bytes, proves top-level
+`extension.js`, and only then invokes Looking Glass. Looking Glass imports the
+installed copy; it does not deploy the checkout. Treat "reload + Looking Glass"
+as this ordered pair: deploy bytes first, hot-swap second.
 
-```bash
-scripts/reload-extension.sh /path/to/extension-or-repo
-```
-
-It discovers a single extension beneath a repository when needed, reads its
-UUID from `metadata.json`, requires the installed target to be `ACTIVE`, copies
-the source tree into the installed extension directory, proves the top-level
-`extension.js` bytes match, then delegates to the receipt-backed Looking Glass
-injector. Already installed and already enabled is the expected case, not a
-blocker. The command does not lifecycle-cycle the extension and does not log out.
-
-## Development Workflow
+### Development Workflow
 
 For iterative host development of top-level `extension.js`, use the live loop:
 
@@ -114,19 +178,23 @@ Do not add a disable/enable step before this loop. The active installed instance
 is the state the Looking Glass transaction replaces.
 
 When a relative import, `metadata.json`, schema consumer, native library, or
-Shell process global changed, use a fresh nested Shell instead:
-
-1. Edit the source files.
-2. Close the nested Shell window.
-3. Relaunch it with `scripts/dev-shell.sh`.
-4. Inspect Looking Glass and the journal inside that fresh session.
+Shell process global changed, launch the repository directly with
+`scripts/debug-extension.sh SOURCE_OR_REPO`. Close and relaunch that nested
+Shell after further Shell-side edits, then inspect Looking Glass and the
+journal inside the fresh session.
 
 Verify changes across three layers: installed file hash matches source, journal
 shows fresh runtime evidence, and observable behavior confirms the update.
 Captures one animation loop period apart can look identical even when working —
 check at non-harmonic offsets.
 
-## Establish the Target
+`debug-extension.sh` gives the nested Shell an isolated XDG data home and dconf
+database, symlinks the discovered checkout as its only user extension, enables
+that UUID on the nested session bus, and keeps ordinary user config visible.
+That lets extensions such as Horner read `~/.config/horner` without allowing
+the devkit session to alter the host Shell's extension settings.
+
+### Establish the Target
 
 Confirm the session, Shell version, and extension UUID before acting:
 
@@ -142,7 +210,7 @@ nested terminals distinct: a command run in a normal host terminal addresses
 the host session bus, while a terminal launched inside the nested desktop
 addresses the nested session.
 
-## Soft-Cycle One Extension
+### Soft-Cycle One Extension
 
 Use the bundled helper:
 
@@ -173,7 +241,7 @@ gsettings set org.gnome.shell disable-user-extensions false
 
 This is still not a fresh JavaScript process.
 
-## Run a Fresh Nested Shell
+### Run a Fresh Nested Shell
 
 The project installer prepares Ubuntu's development runner as part of setup:
 
@@ -253,16 +321,20 @@ the payload after preparation.
 Preferred lower-level path when cua-driver is available on the host:
 
 ```bash
-scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+scripts/looking-glass-inject.sh [--no-wait] [--timeout SECONDS] [--token TOKEN] UUID
 ```
 
-This single command chains: `prepare → show → drive Looking Glass GUI → executed → verify`.
-It drives Alt+F2 → type "lg" → Enter → click Extensions → find Evaluator → paste
-the full one-line payload → press Enter → poll journal for the proof marker.
+This command chains `prepare → show → drive Looking Glass → executed → verify`.
+GNOME 50 opens Looking Glass on Evaluator and focuses its entry, so the driver
+uses the focus-safe span `Alt+F2 → lg → Enter`, types the immutable one-line
+payload, durably records the one-shot boundary, presses Enter once, and polls
+the journal for the exact proof marker. It does not visit the Extensions tab,
+guess coordinates, or touch the clipboard.
 
 Options:
 - `--no-wait` — skip journal polling, report verification status immediately.
-- `--token TOKEN` — supply a deterministic token for testing or audit trails.
+- `--timeout SECONDS` — bound journal polling (default 45 seconds).
+- `--token TOKEN` — supply a deterministic token (for testing / audit trails).
 
 Exit codes:
 - `0` — injected and verified ok=true.
@@ -274,21 +346,19 @@ The script writes progress to stderr and the full receipt JSON (pretty-printed)
 to stdout on success (`0`). On failure it emits diagnostics on stderr and exits
 non-zero so consumers can decide whether to escalate.
 
-If the injected Python driver (`lg-autohotswap.py`) cannot connect to cua-driver
-or cannot find the Evaluator UI element, the shell script falls back to manual
-computer-use guidance below. It records the payload to a temporary file and
-prints its location so the agent can complete the sequence manually.
+If submission may have happened but proof is absent, the script exits `3` and
+prints a `--verify-receipt` command. Re-check that same receipt; never prepare
+or execute a second payload merely because the evaluator result is unclear.
 
-### Manual injection through computer use
+#### Manual injection through computer use (fallback)
 
-Use this path when cua-driver is unavailable or the UI requires visual control.
-Advance one observed stage at a time:
+Use this only when the automated driver failed before its durable submission
+boundary. Advance one observed stage at a time:
 
-1. Send `Alt+F2`; capture and confirm the GNOME run dialog is open.
-2. Type `lg`, press Return, then capture and confirm Looking Glass opened.
-3. Capture the current evaluator entry. Do not guess a stale element index from
-   an earlier capture.
-4. Click the evaluator and type the exact one-line `$PAYLOAD`.
+1. Send `key="alt+F2"`; capture and confirm the GNOME run dialog is open.
+2. Type `lg`, send `key="return"`, then capture and confirm Looking Glass opened.
+3. Confirm the Evaluator page and focused entry. Do not switch to Extensions.
+4. Type the exact one-line `$PAYLOAD` without clipboard interaction.
 5. Capture before execution. Confirm the entry begins with the expected
    `const uuid = '…';`, contains the receipt token, and ends with
    `JSON.stringify(proof)`. Any truncation or mismatch means abort this attempt
@@ -313,7 +383,7 @@ scripts/looking-glass-hotswap.sh abort "$RECEIPT"
 `abort` is valid only while the receipt is `PREPARED`. Once Return has been
 pressed, record `executed` even if the evaluator output is unclear.
 
-### Verify from the durable receipt
+#### Verify from the durable receipt
 
 After recording the single execution, run:
 
@@ -372,7 +442,7 @@ The deploy + receipt-backed injection path is canonical for live host top-level
 reloads; `prepare → show → executed → verify` remains the canonical lower-level
 transaction for agents.
 
-## Reload Preferences and Schemas
+### Reload Preferences and Schemas
 
 Preferences run in a separate `gjs` process. Close the preferences window and
 reopen it to load `prefs.js` changes:
@@ -397,7 +467,7 @@ glib-compile-schemas schemas/
 Then reopen preferences and restart the nested Shell if the Shell process also
 consumes the schema.
 
-## Observe Before Escalating
+## Verification
 
 Follow host Shell logs:
 
@@ -425,7 +495,9 @@ check (timer, transition, frame counter, or new-version field) with at least
 three target-cropped captures at non-harmonic offsets. Captures one loop period
 apart can look identical even when animation is working.
 
-## Separate Reload Failures from Runtime Bugs
+## Pitfalls
+
+### Separate Reload Failures from Runtime Bugs
 
 Before escalating to a fresh process, check whether the new module is active
 but behaving incorrectly. GNOME 50 pitfalls observed in practice include:
@@ -454,7 +526,7 @@ scripts/inspect-shell-source.sh environment
 scripts/inspect-shell-source.sh extension-system
 ```
 
-## Reject Unsafe Host-Restart Advice
+### Reject Unsafe Host-Restart Advice
 
 Do not run these against the active Wayland session:
 

@@ -47,9 +47,12 @@ Other helpers are available directly from a checkout:
 
 ```bash
 ./scripts/diagnose.sh
+./scripts/debug-extension.sh [/path/to/extension-or-repo]
+./scripts/reload-extension.sh --plan /path/to/extension-or-repo
+./scripts/reload-extension.sh /path/to/extension-or-repo
 ./scripts/recycle-extension.sh UUID
 ./scripts/dev-shell.sh
-./scripts/looking-glass-inject.sh [--no-wait] [--token TOKEN] UUID
+./scripts/looking-glass-inject.sh [--no-wait] [--timeout SECONDS] [--token TOKEN] UUID
 ./scripts/looking-glass-hotswap.sh prepare UUID    # receipt lifecycle
 ./scripts/inspect-shell-source.sh environment
 ```
@@ -66,9 +69,10 @@ When changing the skill itself:
    hot-swap, a disposable nested Shell, and a real host logout/login.
 4. Keep fragile GNOME commands in scripts and version-specific findings in
    `references/`; avoid duplicating either as improvised prose.
-5. Run `bash ./tests/skill-ux.sh`, `./tests/run.sh`, and the dedicated hot-swap
-   tests, then inspect both isolated installed runtime copies before claiming
-   completion.
+5. Run `bash ./tests/skill-ux.sh`, `./tests/run.sh`,
+   `./tests/hotswap-agent.sh`, `node ./tests/hotswap-payload.mjs`, and
+   `./tests/reload-extension.sh`, then inspect both isolated installed runtime
+   copies before claiming completion.
 6. Publish, release, or change repository settings only with explicit user
    authorization.
 

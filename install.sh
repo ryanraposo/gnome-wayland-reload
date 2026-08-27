@@ -2,7 +2,7 @@
 set -euo pipefail
 
 NAME="gnome-wayland-reload"
-CANONICAL_DESCRIPTION="Reload and debug GNOME Shell extensions on Wayland"
+CANONICAL_DESCRIPTION="Reload and debug GNOME Shell extensions on Wayland."
 REMOTE_BASE="${GNOME_WAYLAND_RELOAD_BASE_URL:-https://ryanraposo.github.io/gnome-wayland-reload}"
 AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
@@ -126,8 +126,11 @@ FILES=(
     runtimes/hermes-frontmatter.yaml
     references/gnome-50-debugging-notes.md
     references/skill-ux-contract.md
+    references/research-notes.md
     scripts/recycle-extension.sh
     scripts/dev-shell.sh
+    scripts/debug-extension.sh
+    scripts/devkit-session.sh
     scripts/diagnose.sh
     scripts/reload-extension.sh
     scripts/looking-glass-hotswap.sh
@@ -170,7 +173,6 @@ grep -q '^name: gnome-wayland-reload$' "$stage/SKILL.md" || {
     echo "error: downloaded skill failed identity validation" >&2
     exit 1
 }
-
 skill_description="$(sed -n 's/^description: //p' "$stage/SKILL.md" | head -n1)"
 hermes_description="$(sed -n 's/^description: //p' "$stage/runtimes/hermes-frontmatter.yaml" | head -n1)"
 [ "$skill_description" = "$CANONICAL_DESCRIPTION" ] || \
@@ -179,7 +181,6 @@ hermes_description="$(sed -n 's/^description: //p' "$stage/runtimes/hermes-front
     error "canonical Hermes description drifted: $hermes_description"
 [ "${#CANONICAL_DESCRIPTION}" -lt 60 ] || \
     error "canonical skill description must remain under 60 characters"
-
 chmod +x "$stage/scripts/"*.sh "$stage/scripts/"*.py
 
 mkdir -p "$STATE_HOME/backups"
