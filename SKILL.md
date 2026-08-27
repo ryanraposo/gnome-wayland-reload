@@ -41,6 +41,12 @@ working directory and immediately run the bundled helper with no argument:
 scripts/debug-extension.sh
 ```
 
+When invoked as `/gnome-wayland-reload dev`, toggle into dev mode and immediately run the fresh nested Shell for extension development:
+
+```bash
+scripts/dev-shell.sh
+```
+
 When invoked as `/gnome-wayland-reload PATH`, immediately run the same bundled
 helper with `PATH`:
 
@@ -49,7 +55,7 @@ scripts/debug-extension.sh PATH
 ```
 
 The no-argument form uses the current working directory. `PATH` may be an
-extension directory or repository. These direct forms do only this: discover
+extension directory or repository. The `dev` form launches the dev mutter shell (`gnome-shell --devkit --wayland`) as an empty, disposable desktop for developing extensions. These direct forms do only this: discover
 a single nested `metadata.json`, stage the checkout only in a fresh nested
 devkit session, enable its UUID there, and stream its Shell diagnostics. Treat
 the command as an attached manual testing session and wait until the user
@@ -72,6 +78,7 @@ reported by the planner.
 | Intent | Command |
 |---|---|
 | Debug a repo in devkit | `scripts/debug-extension.sh SOURCE_OR_REPO` |
+| Dev mode (mutter dev shell) | `scripts/dev-shell.sh` (`/gnome-wayland-reload dev`) |
 | Inspect and route | `scripts/reload-extension.sh --plan SOURCE` |
 | Deploy and refresh | `scripts/reload-extension.sh SOURCE` |
 | Lifecycle cleanup | `scripts/recycle-extension.sh UUID` |
